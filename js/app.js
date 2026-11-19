@@ -94,6 +94,7 @@ function render() {
   else if (ui.screen === 'setup') h = vSetup();
   else if (ui.screen === 'showRecovery') h = vShowRecovery();
   else if (ui.screen === 'unlock') h = vUnlock();
+  else if (ui.screen === 'mfa') h = vMfa();
   else if (ui.screen === 'recover') h = vRecover();
   else h = vMain();
   root.innerHTML = h;
@@ -148,6 +149,16 @@ function vUnlock() {
   </form>
   <div class="grid2"><button class="btn" data-a="toRecover">שכחתי את הסיסמה</button><button class="btn" data-a="signOut">התנתקות</button></div>`);
 }
+function vMfa() {
+  return gate(`
+  <form class="card" data-form="mfa">
+    <b>קוד אימות</b>
+    <p class="hint" style="margin:0">הזן את הקוד בן 6 הספרות מאפליקציית האימות. הוא מתחלף כל 30 שניות.</p>
+    <div class="field"><label for="otp">קוד</label><input class="inp ltr" id="otp" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required style="font-family:var(--mono);font-size:22px;letter-spacing:6px;text-align:center"></div>
+    <button class="btn pri full" type="submit" ${ui.busy ? 'disabled' : ''}>${ui.busy ? 'בודק…' : 'אישור'}</button>
+  </form>
+  <button class="btn full" data-a="signOut">התנתקות</button>`);
+}
 function vRecover() {
   return gate(`
   <form class="card" data-form="recover">
@@ -201,7 +212,7 @@ function vDash() {
   const list = all();
   const recent = list.slice().sort((a, b) => (b.data.pinned - a.data.pinned) || (b.data.editedAt || '').localeCompare(a.data.editedAt || '')).slice(0, 3);
   const att = attention();
-  const syncTxt = !S.online ? 'לא מחובר · נשמר במכשיר' : S.pending ? 'מסנכרן ' + S.pending + '…' : S.lastSync ? 'מגובה · ' + hm(S.lastSync) : 'מגובה';
+  const syncTxt = S.warning ? S.warning : !S.online ? 'לא מחובר · נשמר במכשיר' : S.pending ? 'מסנכרן ' + S.pending + '…' : S.lastSync ? 'מגובה · ' + hm(S.lastSync) : 'מגובה';
   return `
   <div class="hdr"><div><h1 class="h1">המגירה</h1><div class="sub">${list.length} שירים · ${esc(syncTxt)}</div></div>
     <div style="display:flex;gap:8px"><button class="iconbtn" data-a="newSong" aria-label="שיר חדש">${I.plus}</button><button class="pill-dark" data-a="lockNow"><span class="led" style="background:#3DDC84"></span>נעילה</button></div></div>
@@ -384,6 +395,7 @@ function vSys() {
     <label class="row"><span class="grow"><span class="t">ייבוא שירים מקובץ</span><span class="m">חבילת ייבוא או ייצוא של הפתקים</span></span>${I.chev}<input type="file" accept=".json,.txt,application/json,text/plain" class="sr" data-change="import"></label>
   </div>
   <div class="box">
+    <button class="row" data-a="${ui.mfaOn ? 'mfaOff' : 'mfaSetup'}"><span class="grow"><span class="t">אימות דו־שלבי</span><span class="m">${ui.mfaOn ? 'פעיל · כניסה דורשת גם קוד מאפליקציית אימות' : 'כבוי · מומלץ להפעיל'}</span></span><span class="led" style="width:9px;height:9px;background:${ui.mfaOn ? 'var(--ok)' : 'var(--acc)'}"></span></button>
     <button class="row" data-a="changePass"><span class="grow"><span class="t">שינוי סיסמת כספת</span></span>${I.chev}</button>
     <button class="row" data-a="newRk"><span class="grow"><span class="t">יצירת מפתח שחזור חדש</span><span class="m">המפתח הקודם יפסיק לעבוד</span></span>${I.chev}</button>
     <button class="row" data-a="lockNow"><span class="grow"><span class="t">נעילה עכשיו</span><span class="m">בפתיחה הבאה תידרש סיסמת הכספת</span></span>${I.lock}</button>
@@ -454,6 +466,15 @@ function vSheet() {
       <div class="field"><label for="q1">סיסמה חדשה (לפחות 10 תווים)</label><input class="inp ltr" id="q1" name="q1" type="password" minlength="10" required autocomplete="new-password"></div>
       <div class="field"><label for="q2">שוב, לאימות</label><input class="inp ltr" id="q2" name="q2" type="password" minlength="10" required autocomplete="new-password"></div>
       <button class="btn pri full" type="submit">שינוי</button></form>`;
+  } else if (sh.type === 'mfa') {
+    h = `<h3>הפעלת אימות דו־שלבי</h3>
+    <p class="hint" style="margin:0;font-size:14px">מעכשיו, כדי להיכנס לחשבון יידרש גם קוד מתחלף מאפליקציית אימות. גם מי שישיג את המייל והסיסמה שלך לא יוכל להיכנס בלעדיו.</p>
+    <a class="btn pri full" href="${esc(sh.uri)}">הוספה לאפליקציית הסיסמאות</a>
+    <div style="display:flex;justify-content:center;background:#fff;border-radius:12px;padding:12px"><img src="${esc(sh.qr)}" alt="קוד לסריקה" width="180" height="180"></div>
+    <div class="field"><label>או הקלדה ידנית של המפתח</label><div class="rk" style="font-size:15px">${esc(sh.secret)}</div></div>
+    <form data-form="mfaEnroll" style="display:flex;flex-direction:column;gap:12px">
+      <div class="field"><label for="otp2">הקוד שמופיע עכשיו באפליקציה</label><input class="inp ltr" id="otp2" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required style="font-family:var(--mono);font-size:22px;letter-spacing:6px;text-align:center"></div>
+      <button class="btn dark full" type="submit">אישור והפעלה</button></form>`;
   } else if (sh.type === 'rk') {
     h = `<h3>מפתח שחזור חדש</h3><div class="rk">${esc(sh.rk)}</div><p class="hint" style="margin:0">המפתח הקודם כבר לא עובד. שמור את החדש מחוץ לטלפון.</p><div class="grid2"><button class="btn" data-a="copyRk2">העתקה</button><button class="btn pri" data-a="closeSheet">שמרתי</button></div>`;
   }
@@ -546,7 +567,7 @@ const A = {
   copyRk2() { navigator.clipboard && navigator.clipboard.writeText(ui.sheet.rk).then(() => toast('הועתק')); },
   async rkDone() { if (!$('#rkok').checked) return toast('סמן שהמפתח שמור'); ui.recoveryKey = ''; await store.rememberHere(); await enterMain(); },
   async signOut() {
-    const go = async () => { AU.player.pause(); AU.now.recId = null; ui.sheet = null; await store.signOutAll(); ui.screen = 'auth'; render(); };
+    const go = async () => { AU.player.pause(); AU.now.recId = null; ui.sheet = null; await store.signOutAll(); ui.screen = 'auth'; ui.authMode = 'in'; render(); };
     if (ui.screen !== 'main') return go();
     confirmSheet('להתנתק מהמכשיר?', 'העותק המקומי יימחק מהטלפון. כל השירים וההקלטות נשארים מוצפנים בענן.', 'התנתקות', go);
   },
@@ -663,6 +684,15 @@ const A = {
     } catch (e) { ui.busy = false; fail(e); render(); }
   },
   changePass() { openSheet({ type: 'pass' }); },
+  async mfaSetup() {
+    try { const f = await api.mfaEnroll(); openSheet({ type: 'mfa', id: f.id, qr: f.totp.qr_code, secret: f.totp.secret, uri: f.totp.uri }); }
+    catch (e) { fail(e); }
+  },
+  mfaOff() {
+    confirmSheet('לכבות את האימות הדו־שלבי?', 'הכניסה לחשבון תחזור להיות עם מייל וסיסמה בלבד. השירים נשארים מוצפנים כרגיל.', 'כיבוי', async () => {
+      try { const fs = await api.verifiedFactors(); for (const f of fs) await api.mfaUnenroll(f.id); ui.mfaOn = false; ui.sheet = null; render(); toast('האימות הדו־שלבי כובה'); } catch (e) { fail(e); }
+    });
+  },
   newRk() { confirmSheet('ליצור מפתח שחזור חדש?', 'המפתח הקודם יפסיק לעבוד מיד.', 'יצירה', async () => { try { const row = await store.vaultState(); const rk = await store.newRecovery(row); openSheet({ type: 'rk', rk }); } catch (e) { fail(e); } }, false); },
   closeSheet() { closeSheet(); },
   overlay(d, el, ev) { if (ev.target === el && ui.sheet && !['import', 'recKind', 'uploadKind'].includes(ui.sheet.type)) closeSheet(); },
@@ -695,6 +725,15 @@ const F = {
     ui.busy = true; ui.err = ''; render();
     try { await store.unlockWithRecovery(fd.get('rk'), fd.get('n1'), ui.keysRow); ui.busy = false; toast('הסיסמה הוחלפה'); await enterMain(); }
     catch (e) { ui.busy = false; ui.err = e.message; render(); }
+  },
+  async mfa(fd) {
+    ui.busy = true; ui.err = ''; render();
+    try { await api.mfaVerify(ui.mfaFactor, String(fd.get('code')).trim()); ui.busy = false; await afterLogin(); }
+    catch (e) { ui.busy = false; ui.err = /invalid|expired/i.test(e.message) ? 'הקוד שגוי או שפג תוקפו. נסה את הקוד הבא.' : e.message; render(); }
+  },
+  async mfaEnroll(fd) {
+    try { await api.mfaVerify(ui.sheet.id, String(fd.get('code')).trim()); ui.mfaOn = true; ui.sheet = null; render(); toast('אימות דו־שלבי הופעל'); }
+    catch (e) { toast(/invalid|expired/i.test(e.message) ? 'הקוד שגוי. נסה את הקוד הבא שמופיע' : e.message); }
   },
   async newSong(fd) {
     const id = await store.createSong({ title: fd.get('title').trim() || 'שיר חדש', stage: fd.get('stage') || 'spark' });
@@ -805,6 +844,9 @@ function afterRender() {
 
 // ---------- זרימת פתיחה ----------
 async function afterLogin() {
+  const factors = await api.verifiedFactors();
+  ui.mfaOn = factors.length > 0;
+  if (ui.mfaOn && api.currentAal() !== 'aal2') { ui.mfaFactor = factors[0].id; ui.screen = 'mfa'; return render(); }
   ui.keysRow = await store.vaultState();
   if (!ui.keysRow) { ui.screen = 'setup'; return render(); }
   if (await store.tryRemembered(ui.keysRow)) return enterMain();

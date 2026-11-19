@@ -11,6 +11,11 @@ function saveSession(s) {
 }
 
 export function currentUser() { return session && session.user; }
+
+// רמת האימות של החיבור הנוכחי: aal1 = סיסמה בלבד, aal2 = סיסמה וקוד חד־פעמי
+export function currentAal() {
+  try { return JSON.parse(atob(session.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).aal || 'aal1'; } catch (e) { return 'aal1'; }
+}
 export function hasSession() { return !!(session && session.refresh_token); }
 
 class ApiError extends Error {
@@ -138,4 +143,25 @@ export async function downloadFile(path) {
 }
 export async function removeFile(path) {
   return parse(await req('/storage/v1/object/' + CONFIG.bucket + '/' + enc(path), { method: 'DELETE' }));
+}
+
+// ---------- אימות דו־שלבי ----------
+export async function getUser() { return parse(await req('/auth/v1/user')); }
+export async function verifiedFactors() {
+  const u = await getUser();
+  return (u.factors || []).filter(f => f.factor_type === 'totp' && f.status === 'verified');
+}
+export async function mfaEnroll() {
+  // מנקה ניסיונות הרשמה קודמים שלא הושלמו
+  const u = await getUser();
+  for (const f of (u.factors || []).filter(f => f.status !== 'verified')) { try { await parse(await req('/auth/v1/factors/' + f.id, { method: 'DELETE' })); } catch (e) {} }
+  return parse(await req('/auth/v1/factors', { method: 'POST', headers: J, body: JSON.stringify({ factor_type: 'totp', friendly_name: 'המגירה ' + new Date().toISOString().slice(0, 10) }) }));
+}
+export async function mfaVerify(factorId, code) {
+  const ch = await parse(await req('/auth/v1/factors/' + factorId + '/challenge', { method: 'POST', headers: J, body: '{}' }));
+  const b = await parse(await req('/auth/v1/factors/' + factorId + '/verify', { method: 'POST', headers: J, body: JSON.stringify({ challenge_id: ch.id, code }) }));
+  const s = fromAuth(b); if (s) saveSession(s);
+}
+export async function mfaUnenroll(factorId) {
+  return parse(await req('/auth/v1/factors/' + factorId, { method: 'DELETE' }));
 }

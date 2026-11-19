@@ -139,6 +139,8 @@ export async function sync() {
     const pendOps = await outbox.all();
     const pend = new Set(pendOps.map(o => o.id));
     const [rows, recs] = await Promise.all([api.listSongs(), api.listRecordings()]);
+    // הגנה: אם השרת פתאום מחזיר מגירה ריקה בזמן שבמכשיר יש שירים, לא מוחקים את העותק המקומי
+    if (rows.length === 0 && S.songs.size > 0) { const e = new Error('השרת החזיר מגירה ריקה. העותק במכשיר נשמר בלי שינוי'); e.suspicious = true; throw e; }
     const seen = new Set();
     for (const r of rows) {
       seen.add(r.id);
@@ -156,6 +158,7 @@ export async function sync() {
     S.lastSync = new Date(); S.online = true;
   } catch (e) {
     if (e.status === 401) throw e;
+    if (e.suspicious) S.warning = e.message;
     S.online = false;
   } finally { syncing = false; emit(); }
 }
