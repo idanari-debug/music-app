@@ -1,6 +1,6 @@
 // שומר את קבצי האפליקציה במכשיר כדי שתיפתח גם בלי קליטה.
 // לא שומר שום תוכן: השירים נשמרים מוצפנים בנפרד, וההקלטות לא נשמרות כאן.
-const V = 'megira-v1';
+const V = 'megira-v2';
 const SHELL = ['./', 'index.html', 'css/app.css', 'manifest.webmanifest', 'js/app.js', 'js/api.js', 'js/store.js', 'js/db.js', 'js/crypto.js', 'js/chords.js', 'js/audio.js', 'js/importer.js', 'js/config.js', 'icons/icon-192.png', 'icons/apple-touch-icon.png', 'icons/favicon.png'];
 
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
