@@ -1,0 +1,8 @@
+# לעולם לא להעלות חומרים אמיתיים
+*-import*.json
+*backup*.json
+*.m4a
+*.mp3
+*.wav
+test/
+node_modules/

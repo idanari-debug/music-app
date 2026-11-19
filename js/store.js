@@ -1,0 +1,311 @@
+// מצב האפליקציה: שירים והקלטות מפוענחים בזיכרון בלבד, סנכרון מול השרת ותור שינויים.
+import * as api from './api.js';
+import * as C from './crypto.js';
+import { CONFIG } from './config.js';
+import { kv, songsCache, recsCache, outbox, wipeLocal } from './db.js';
+
+export const STAGES = [
+  { k: 'ready', name: 'מוכן', dot: '#2E9E5B' },
+  { k: 'close', name: 'קרוב', dot: '#6B5CE7' },
+  { k: 'dev', name: 'בפיתוח', dot: '#FF5A1F' },
+  { k: 'trans', name: 'תרגום', dot: '#2F86D6' },
+  { k: 'spark', name: 'ניצוץ', dot: '#E0A100' },
+  { k: 'raw', name: 'חומר גלם', dot: '#D94C8A' },
+  { k: 'bottom', name: 'המגירה התחתונה', dot: '#8A8882' }
+];
+export const stageOf = k => STAGES.find(s => s.k === k) || STAGES[5];
+export const POTS = ['גבוה', 'בינוני', 'נמוך', 'צדדי'];
+export const KINDS = [
+  { k: 'sketch', name: 'סקיצה' },
+  { k: 'voice', name: 'הקלטה קולית' },
+  { k: 'guitar', name: 'ליין גיטרה' },
+  { k: 'beat', name: 'טייפ ביט' },
+  { k: 'final', name: 'הקלטה סופית' }
+];
+export const kindName = k => (KINDS.find(x => x.k === k) || KINDS[1]).name;
+
+let key = null;
+export const S = { songs: new Map(), recs: new Map(), online: navigator.onLine, pending: 0, lastSync: null };
+const listeners = new Set();
+export const onChange = fn => listeners.add(fn);
+const emit = () => listeners.forEach(f => { try { f(); } catch (e) { console.error(e); } });
+
+export const uid = () => (crypto.randomUUID ? crypto.randomUUID() : ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)));
+export const isUnlocked = () => !!key;
+export const getKey = () => key;
+
+// ---------- כספת ----------
+export async function vaultState() {
+  let row = null;
+  try { row = await api.getKeys(); if (row) await kv.set('keys', row); }
+  catch (e) { if (e.status === 401) throw e; row = await kv.get('keys'); }
+  return row;
+}
+
+export async function createVault(passphrase) {
+  const master = await C.newMasterKey();
+  const salt = C.b64.enc(C.randomBytes(16));
+  const rsalt = C.b64.enc(C.randomBytes(16));
+  const rk = C.newRecoveryKey();
+  const it = CONFIG.kdfIterations;
+  const row = {
+    kdf_salt: salt, kdf_iterations: it,
+    wrapped_key_password: await C.wrap(master, await C.deriveKek(passphrase, salt, it)),
+    recovery_salt: rsalt,
+    wrapped_key_recovery: await C.wrap(master, await C.deriveKek(C.normRecovery(rk), rsalt, it)),
+    key_check: await C.encJSON(master, { check: 'megira' })
+  };
+  await api.putKeys(row);
+  await kv.set('keys', row);
+  key = master;
+  return rk;
+}
+
+async function checkKey(k, row) {
+  const v = await C.decJSON(k, row.key_check);
+  if (!v || v.check !== 'megira') throw new Error('bad-key');
+}
+
+export async function unlock(passphrase, row, remember) {
+  let k;
+  try { k = await C.unwrap(row.wrapped_key_password, await C.deriveKek(passphrase, row.kdf_salt, row.kdf_iterations)); }
+  catch (e) { throw new Error('סיסמת הכספת שגויה'); }
+  await checkKey(k, row);
+  key = k;
+  if (remember) await kv.set('mk', await C.nonExtractableCopy(k)); else await kv.del('mk');
+}
+
+export async function unlockWithRecovery(recovery, newPass, row) {
+  let k;
+  try { k = await C.unwrap(row.wrapped_key_recovery, await C.deriveKek(C.normRecovery(recovery), row.recovery_salt, row.kdf_iterations)); }
+  catch (e) { throw new Error('מפתח השחזור שגוי'); }
+  await checkKey(k, row);
+  key = k;
+  await changePassphrase(newPass, row);
+}
+
+export async function changePassphrase(newPass, row) {
+  const salt = C.b64.enc(C.randomBytes(16));
+  const next = Object.assign({}, row, { kdf_salt: salt, wrapped_key_password: await C.wrap(key, await C.deriveKek(newPass, salt, row.kdf_iterations)) });
+  delete next.created_at; delete next.updated_at;
+  await api.putKeys(next);
+  await kv.set('keys', next);
+  await kv.del('mk');
+}
+
+export async function newRecovery(row) {
+  const rsalt = C.b64.enc(C.randomBytes(16));
+  const rk = C.newRecoveryKey();
+  const next = Object.assign({}, row, { recovery_salt: rsalt, wrapped_key_recovery: await C.wrap(key, await C.deriveKek(C.normRecovery(rk), rsalt, row.kdf_iterations)) });
+  delete next.created_at; delete next.updated_at;
+  await api.putKeys(next);
+  await kv.set('keys', next);
+  return rk;
+}
+
+export async function rememberHere() { if (key) await kv.set('mk', await C.nonExtractableCopy(key)); }
+
+export async function tryRemembered(row) {
+  const k = await kv.get('mk');
+  if (!k || !row) return false;
+  try { await checkKey(k, row); key = k; return true; } catch (e) { await kv.del('mk'); return false; }
+}
+
+export async function lock() { key = null; S.songs.clear(); S.recs.clear(); await kv.del('mk'); }
+export async function signOutAll() { await lock(); await wipeLocal(); await api.signOut(); }
+
+// ---------- טעינה וסנכרון ----------
+async function decodeSong(row) {
+  return { id: row.id, data: await C.decJSON(key, row.enc), created_at: row.created_at, updated_at: row.updated_at, deleted_at: row.deleted_at || null };
+}
+async function decodeRec(row) {
+  return { id: row.id, song_id: row.song_id, path: row.storage_path, meta: await C.decJSON(key, row.enc_meta), created_at: row.created_at, deleted_at: row.deleted_at || null };
+}
+
+export async function loadLocal() {
+  const [rows, recs] = await Promise.all([songsCache.all(), recsCache.all()]);
+  for (const r of rows) { try { S.songs.set(r.id, await decodeSong(r)); } catch (e) {} }
+  for (const r of recs) { try { S.recs.set(r.id, await decodeRec(r)); } catch (e) {} }
+  S.pending = (await outbox.all()).length;
+  emit();
+}
+
+let syncing = false;
+export async function sync() {
+  if (syncing || !key) return;
+  syncing = true;
+  try {
+    await flush();
+    const pendOps = await outbox.all();
+    const pend = new Set(pendOps.map(o => o.id));
+    const [rows, recs] = await Promise.all([api.listSongs(), api.listRecordings()]);
+    const seen = new Set();
+    for (const r of rows) {
+      seen.add(r.id);
+      if (pend.has(r.id)) continue;
+      try { S.songs.set(r.id, await decodeSong(r)); } catch (e) { console.warn('decode', r.id); }
+    }
+    for (const id of [...S.songs.keys()]) if (!seen.has(id) && !pend.has(id)) S.songs.delete(id);
+    await songsCache.clear(); await songsCache.putMany(rows);
+    await songsCache.putMany(pendOps.filter(o => o.kind === 'song').map(o => Object.assign({ created_at: null, updated_at: null }, o.row)));
+    const rseen = new Set();
+    for (const r of recs) { rseen.add(r.id); if (pend.has(r.id)) continue; try { S.recs.set(r.id, await decodeRec(r)); } catch (e) {} }
+    for (const id of [...S.recs.keys()]) if (!rseen.has(id) && !pend.has(id)) S.recs.delete(id);
+    await recsCache.clear(); await recsCache.putMany(recs);
+    await recsCache.putMany(pendOps.filter(o => o.kind === 'rec').map(o => Object.assign({ created_at: null }, o.row)));
+    S.lastSync = new Date(); S.online = true;
+  } catch (e) {
+    if (e.status === 401) throw e;
+    S.online = false;
+  } finally { syncing = false; emit(); }
+}
+
+let flushP = null, flushAgain = false;
+function flush() {
+  if (flushP) { flushAgain = true; return flushP; }
+  flushP = (async () => { do { flushAgain = false; await flushOnce(); } while (flushAgain); })().finally(() => { flushP = null; });
+  return flushP;
+}
+
+async function flushOnce() {
+  const ops = (await outbox.all()).sort((a, b) => a.ts - b.ts);
+  for (const op of ops) {
+    try {
+      if (op.kind === 'song') await api.upsertSong(op.row);
+      else if (op.kind === 'rec') await api.upsertRecording(op.row);
+      else if (op.kind === 'version') await api.addVersion(op.row.song_id, op.row.enc);
+      await outbox.del(op.key);
+    } catch (e) {
+      if (e.status && e.status >= 400 && e.status < 500 && e.status !== 401 && e.status !== 408 && e.status !== 429) { console.error('נדחה', op, e); await outbox.put(Object.assign({}, op, { failed: String(e.message || e.status) })); continue; }
+      S.online = false; break;
+    }
+  }
+  S.pending = (await outbox.all()).length;
+}
+
+async function queue(kind, id, row) {
+  await outbox.put({ key: kind + ':' + id + (kind === 'version' ? ':' + Date.now() : ''), kind, id, row, ts: Date.now() });
+  S.pending++;
+  flush().then(emit, emit);
+}
+
+// ---------- שירים ----------
+export const songs = () => [...S.songs.values()].filter(s => !s.deleted_at);
+export const trashedSongs = () => [...S.songs.values()].filter(s => s.deleted_at);
+export const recsOf = id => [...S.recs.values()].filter(r => r.song_id === id && !r.deleted_at).sort((a, b) => (b.meta.date || '').localeCompare(a.meta.date || ''));
+export const trashedRecs = () => [...S.recs.values()].filter(r => r.deleted_at && !(S.songs.get(r.song_id) || {}).deleted_at);
+
+export function blankSong(over = {}) {
+  const now = new Date().toISOString();
+  return Object.assign({ title: 'שיר חדש', stage: 'spark', readiness: null, potential: 'בינוני', next: '', notes: '', lyrics: '', beats: [], pinned: false, created: now, editedAt: now, sourceDate: '', log: [{ d: now, e: 'נוצר' }] }, over);
+}
+
+export async function saveSong(id, data, { logEntry, deleted_at } = {}) {
+  const prev = S.songs.get(id);
+  const now = new Date().toISOString();
+  data = Object.assign({}, data, { editedAt: now });
+  if (logEntry) data.log = [{ d: now, e: logEntry }].concat(data.log || []).slice(0, 200);
+  const del = deleted_at !== undefined ? deleted_at : (prev ? prev.deleted_at : null);
+  const encd = await C.encJSON(key, data);
+  const row = { id, enc: encd, deleted_at: del };
+  S.songs.set(id, { id, data, created_at: prev ? prev.created_at : now, updated_at: now, deleted_at: del });
+  await songsCache.put(Object.assign({ created_at: prev ? prev.created_at : now, updated_at: now }, row));
+  emit();
+  await queue('song', id, row);
+  return id;
+}
+
+export async function createSong(over) {
+  const id = uid();
+  await saveSong(id, blankSong(over));
+  return id;
+}
+
+export async function addVersion(id, lyrics, title) {
+  const encd = await C.encJSON(key, { lyrics, title, at: new Date().toISOString() });
+  await queue('version', id, { song_id: id, enc: encd });
+}
+
+export async function versions(id) {
+  const rows = await api.listVersions(id);
+  const out = [];
+  for (const r of rows) { try { out.push(Object.assign({ id: r.id, created_at: r.created_at }, await C.decJSON(key, r.enc))); } catch (e) {} }
+  return out;
+}
+
+export async function trashSong(id) {
+  const s = S.songs.get(id);
+  await saveSong(id, s.data, { logEntry: 'הועבר לסל המחזור', deleted_at: new Date().toISOString() });
+}
+export async function restoreSong(id) {
+  const s = S.songs.get(id);
+  await saveSong(id, s.data, { logEntry: 'שוחזר מסל המחזור', deleted_at: null });
+}
+
+export async function purgeSong(id) {
+  await flush();
+  for (const r of [...S.recs.values()].filter(r => r.song_id === id)) {
+    try { await api.removeFile(r.path); } catch (e) {}
+  }
+  await api.deleteSong(id);
+  S.songs.delete(id);
+  for (const r of [...S.recs.values()]) if (r.song_id === id) { S.recs.delete(r.id); await recsCache.del(r.id); }
+  await songsCache.del(id);
+  emit();
+}
+
+// ---------- הקלטות ----------
+export async function addRecording(songId, bytes, meta) {
+  const id = uid();
+  const u = api.currentUser();
+  const path = u.id + '/' + id + '.bin';
+  const encd = await C.encBytes(key, bytes);
+  await api.uploadFile(path, encd);
+  meta = Object.assign({ size: encd.length, date: new Date().toISOString() }, meta);
+  const row = { id, song_id: songId, storage_path: path, enc_meta: await C.encJSON(key, meta), deleted_at: null };
+  await api.upsertRecording(row);
+  const rec = { id, song_id: songId, path, meta, created_at: meta.date, deleted_at: null };
+  S.recs.set(id, rec);
+  await recsCache.put(Object.assign({ created_at: meta.date }, row));
+  emit();
+  return rec;
+}
+
+export async function updateRecording(id, metaPatch, deleted_at) {
+  const r = S.recs.get(id);
+  const meta = Object.assign({}, r.meta, metaPatch || {});
+  const del = deleted_at !== undefined ? deleted_at : r.deleted_at;
+  const row = { id, song_id: r.song_id, storage_path: r.path, enc_meta: await C.encJSON(key, meta), deleted_at: del };
+  S.recs.set(id, Object.assign({}, r, { meta, deleted_at: del }));
+  await recsCache.put(Object.assign({ created_at: r.created_at }, row));
+  emit();
+  await queue('rec', id, row);
+}
+
+export async function purgeRecording(id) {
+  await flush();
+  const r = S.recs.get(id);
+  await api.removeFile(r.path);
+  await api.deleteRecording(id);
+  S.recs.delete(id); await recsCache.del(id);
+  emit();
+}
+
+const audioCache = new Map();
+export async function recordingUrl(id) {
+  if (audioCache.has(id)) return audioCache.get(id);
+  const r = S.recs.get(id);
+  const bytes = await C.decBytes(key, await api.downloadFile(r.path));
+  const url = URL.createObjectURL(new Blob([bytes], { type: r.meta.mime || 'audio/mp4' }));
+  audioCache.set(id, url);
+  return url;
+}
+export async function recordingBytes(id) {
+  const r = S.recs.get(id);
+  return C.decBytes(key, await api.downloadFile(r.path));
+}
+
+export const storageUsed = () => [...S.recs.values()].reduce((a, r) => a + (r.meta.size || 0), 0);
+
+window.addEventListener('online', () => { S.online = true; sync(); });
+window.addEventListener('offline', () => { S.online = false; emit(); });
