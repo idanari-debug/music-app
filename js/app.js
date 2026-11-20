@@ -78,6 +78,7 @@ const I = {
   next: svg('<path d="M15 6l-6 6 6 6"/>', 16, 2.4),
   prev: svg('<path d="M9 6l6 6-6 6"/>', 16, 2.4)
 };
+const LOGO = (sz) => `<svg class="lg" width="${sz}" height="${sz}" viewBox="0 0 512 512" role="img" aria-label="הלוגו של המגירה"><rect width="512" height="512" rx="114" style="fill:var(--lg-bg)"/><g transform="rotate(-8 256 200)"><rect x="132" y="86" width="260" height="170" rx="22" style="fill:var(--lg-sh)"/><rect x="126" y="78" width="260" height="170" rx="22" style="fill:var(--lg-cas)"/><rect x="148" y="96" width="216" height="34" rx="9" style="fill:var(--lg-lab)"/><rect x="166" y="146" width="180" height="62" rx="31" style="fill:var(--lg-win)"/><circle cx="207" cy="177" r="19" style="fill:var(--lg-cas)"/><circle cx="207" cy="177" r="7" style="fill:var(--lg-win)"/><circle cx="305" cy="177" r="19" style="fill:var(--lg-cas)"/><circle cx="305" cy="177" r="7" style="fill:var(--lg-win)"/></g><rect x="76" y="262" width="360" height="170" rx="34" style="fill:var(--lg-dr)"/><rect x="90" y="262" width="332" height="12" rx="6" fill="rgba(0,0,0,.07)"/><path d="M126 350 h36 l13 -28 l18 56 l18 -42 l14 28 l12 -14 h22 l14 -30 l18 52 l16 -38 l12 16 h37" fill="none" style="stroke:var(--lg-wv)" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const WAVES = ['M0 12V6C25 2 45 10 70 6S120 1 145 6S185 9 200 5V12Z', 'M0 12V4C30 9 55 2 85 6S135 10 160 5S190 3 200 7V12Z', 'M0 12V7C20 3 50 4 75 8S125 2 150 5S180 9 200 6V12Z'];
 const SPECK = '<svg class="speck" aria-hidden="true"><filter id="spk"><feTurbulence type="fractalNoise" baseFrequency=".6" numOctaves="1" seed="4"/><feColorMatrix values="0 0 0 0 .32  0 0 0 0 .24  0 0 0 0 .18  14 0 0 0 -9.6"/></filter><rect width="100%" height="100%" filter="url(#spk)"/></svg>';
 
@@ -111,7 +112,7 @@ const firstChord = t => { const m = (t || '').match(/\[([A-G][^\]]*)\]/); return
 function render() {
   const keep = ui.screen === 'main' ? { k: ui.nav + ui.view + ui.songId + ui.tab + ui.sysView + ui.drawer, y: ($('.main') || {}).scrollTop || 0, y2: ($('.col.mid') || {}).scrollTop || 0, y3: ($('.col.main2') || {}).scrollTop || 0 } : null;
   let h = '';
-  if (ui.screen === 'boot') h = '<div class="gate">' + SPECK + '<div class="logo"><img src="icons/icon-192.png" alt=""><span class="h1">המגירה</span></div><p class="hint">פותח את הכספת…</p></div>';
+  if (ui.screen === 'boot') h = '<div class="gate">' + SPECK + '<div class="logo">${LOGO(60)}<span class="h1">המגירה</span></div><p class="hint">פותח את הכספת…</p></div>';
   else if (ui.screen === 'auth') h = vAuth();
   else if (ui.screen === 'confirm-mail') h = vConfirmMail();
   else if (ui.screen === 'setup') h = vSetup();
@@ -130,7 +131,7 @@ function render() {
   afterRender();
 }
 
-function gate(inner) { return '<div class="gate">' + SPECK + '<div class="logo"><img src="icons/icon-192.png" alt=""><div><div class="h1">המגירה</div><div class="sub" style="margin-top:6px">כל השירים שלך, נעולים</div></div></div>' + (ui.err ? '<div class="err" role="alert">' + esc(ui.err) + '</div>' : '') + inner + '</div>'; }
+function gate(inner) { return '<div class="gate">' + SPECK + '<div class="logo">' + LOGO(60) + '<div><div class="h1">המגירה</div><div class="sub" style="margin-top:6px">כל השירים שלך, נעולים</div></div></div>' + (ui.err ? '<div class="err" role="alert">' + esc(ui.err) + '</div>' : '') + inner + '</div>'; }
 
 function vAuth() {
   const up = ui.authMode === 'up';
@@ -569,7 +570,7 @@ function vWide() {
   const ds = store.drawers(); const openN = all().reduce((a, s) => a + store.tasksOf(s).filter(t => !t.done).length, 0);
   const night = TH.isNight();
   const side = `<aside class="side">
-    <div class="brand"><img src="icons/icon-192.png" alt=""><b>המגירה</b><span style="flex:1"></span><button class="iconbtn sm" data-a="themeToggle" aria-label="${night ? 'מעבר למצב יום' : 'מעבר למצב לילה'}">${night ? I.sun : I.moon}</button></div>
+    <div class="brand">${LOGO(34)}<b>המגירה</b><span style="flex:1"></span><button class="iconbtn sm" data-a="themeToggle" aria-label="${night ? 'מעבר למצב יום' : 'מעבר למצב לילה'}">${night ? I.sun : I.moon}</button></div>
     <button class="btn pri sm" data-a="newSong">${I.plus.replace(/20/g, '16')}שיר חדש</button>
     <div style="display:flex;flex-direction:column;gap:2px">
       <div class="sidelbl"><span>מגירות</span><button data-a="drawersEdit">סידור</button></div>
