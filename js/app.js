@@ -23,6 +23,16 @@ const ui = {
   stage: false, stageRun: false, stageSpeed: 3, stageSize: 26
 };
 const isWide = () => window.innerWidth >= 1000;
+const reduceMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+// מעבר רך בין דפים: קדימה, אחורה או החלפה רכה
+const NAV_DIR = { drawer: 'fwd', open: 'fwd', openState: 'fwd', drawersEdit: 'fwd', goPlaying: 'fwd', songBack: 'back', home: 'back', nav: 'fade', tab: 'fade', sysView: d => d.k === 'trash' ? 'fwd' : 'back' };
+function withTransition(dir, fn) {
+  if (!document.startViewTransition || reduceMotion() || ui.screen !== 'main') return fn();
+  document.documentElement.dataset.vt = isWide() ? 'fade' : dir;
+  const t = document.startViewTransition(() => fn());
+  t.finished.finally(() => { delete document.documentElement.dataset.vt; });
+  return t.updateCallbackDone;
+}
 
 // ---------- עזרים ----------
 const DAY = 86400000;
@@ -110,9 +120,10 @@ const firstChord = t => { const m = (t || '').match(/\[([A-G][^\]]*)\]/); return
 
 // ---------- רינדור ----------
 function render() {
+  ui.sheetFresh = !root.querySelector('.overlay');
   const keep = ui.screen === 'main' ? { k: ui.nav + ui.view + ui.songId + ui.tab + ui.sysView + ui.drawer, y: ($('.main') || {}).scrollTop || 0, y2: ($('.col.mid') || {}).scrollTop || 0, y3: ($('.col.main2') || {}).scrollTop || 0 } : null;
   let h = '';
-  if (ui.screen === 'boot') h = '<div class="gate">' + SPECK + '<div class="logo">${LOGO(60)}<span class="h1">המגירה</span></div><p class="hint">פותח את הכספת…</p></div>';
+  if (ui.screen === 'boot') h = '<div class="gate">' + SPECK + '<div class="logo">' + LOGO(60) + '<span class="h1">המגירה</span></div><p class="hint">פותח את הכספת…</p></div>';
   else if (ui.screen === 'auth') h = vAuth();
   else if (ui.screen === 'confirm-mail') h = vConfirmMail();
   else if (ui.screen === 'setup') h = vSetup();
@@ -676,12 +687,16 @@ function vSheet() {
   } else if (sh.type === 'rk') {
     h = `<h3>מפתח שחזור חדש</h3><div class="rk">${esc(sh.rk)}</div><p class="hint" style="margin:0">המפתח הקודם כבר לא עובד. שמור את החדש מחוץ לטלפון.</p><div class="grid2"><button class="btn" data-a="copyRk2">העתקה</button><button class="btn pri" data-a="closeSheet">שמרתי</button></div>`;
   }
-  return `<div class="overlay ${sh.type === 'chord' ? 'clear' : ''}" data-a="overlay"><div class="sheet" role="dialog" aria-modal="true"><span class="grab"></span>${h}</div></div>`;
+  return `<div class="overlay ${sh.type === 'chord' ? 'clear' : ''} ${ui.sheetFresh ? 'enter' : ''}" data-a="overlay"><div class="sheet" role="dialog" aria-modal="true"><span class="grab"></span>${h}</div></div>`;
 }
 
 // ---------- פעולות ----------
 const openSheet = sh => { ui.sheet = sh; render(); };
-const closeSheet = () => { ui.sheet = null; render(); };
+const closeSheet = () => {
+  const o = root.querySelector('.overlay');
+  if (!o || reduceMotion()) { ui.sheet = null; return render(); }
+  o.classList.add('closing'); setTimeout(() => { ui.sheet = null; render(); }, 210);
+};
 const confirmSheet = (title, text, yes, fn, danger = true) => openSheet({ type: 'confirm', title, text, yes, fn, danger });
 
 async function patchSong(id, patch, logEntry) {
@@ -1121,11 +1136,16 @@ const INP = {
 // ---------- אירועים ----------
 root.addEventListener('click', ev => {
   const el = ev.target.closest('[data-a]');
-  if (!el || !root.contains(el)) { if (ui.swipeOpen && !ev.target.closest('.swrap')) { ui.swipeOpen = null; render(); } return; }
-  if (el.closest('.swrap') && ui.swipeOpen && el.classList.contains('srow')) { ev.preventDefault(); ui.swipeOpen = null; render(); return; }
+  if (!el || !root.contains(el)) { if (ui.swipeOpen && !ev.target.closest('.swrap')) closeSwipe(); return; }
+  if (el.closest('.swrap') && ui.swipeOpen && el.classList.contains('srow')) { ev.preventDefault(); closeSwipe(); return; }
   if (el.dataset.a === 'overlay' && ev.target !== el) return;
   const fn = A[el.dataset.a];
-  if (fn) { if (el.tagName === 'A') return; ev.preventDefault(); Promise.resolve(fn(el.dataset, el, ev)).catch(fail); }
+  if (fn) {
+    if (el.tagName === 'A') return; ev.preventDefault();
+    let dir = NAV_DIR[el.dataset.a]; if (typeof dir === 'function') dir = dir(el.dataset);
+    if (dir && !ui.sheet) Promise.resolve(withTransition(dir, () => fn(el.dataset, el, ev))).catch(fail);
+    else Promise.resolve(fn(el.dataset, el, ev)).catch(fail);
+  }
 });
 root.addEventListener('submit', ev => {
   const f = ev.target.closest('[data-form]'); if (!f) return;
@@ -1165,21 +1185,39 @@ document.addEventListener('keydown', ev => {
   if (ev.key === ' ' && !typing && AU.now.recId && !ui.stage) { ev.preventDefault(); A.playToggle(); }
 });
 
-// החלקה על שורות
+// החלקה על שורות: השורה עוקבת אחרי האצבע, ובשחרור נגררת בתנועה רכה למקומה
+const SW_W = 198;
+function closeSwipe() { const w = ui.swipeOpen && root.querySelector('.swrap[data-sw="' + ui.swipeOpen + '"]'); if (w) w.classList.remove('open'); ui.swipeOpen = null; }
 let sw = null;
-root.addEventListener('touchstart', ev => { const w = ev.target.closest('.swrap'); if (!w) return; sw = { el: w, x: ev.touches[0].clientX, y: ev.touches[0].clientY, dx: 0, lock: null }; }, { passive: true });
+root.addEventListener('touchstart', ev => {
+  const w = ev.target.closest('.swrap');
+  if (ui.swipeOpen && (!w || w.dataset.sw !== ui.swipeOpen)) closeSwipe();
+  if (!w) return;
+  sw = { el: w, row: w.querySelector('.srow'), act: w.querySelector('.sw-act'), x: ev.touches[0].clientX, y: ev.touches[0].clientY, dx: 0, lock: null, t: Date.now() };
+}, { passive: true });
 root.addEventListener('touchmove', ev => {
   if (!sw) return; const t = ev.touches[0]; const dx = t.clientX - sw.x, dy = t.clientY - sw.y;
   if (sw.lock == null && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) sw.lock = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
   if (sw.lock !== 'x') return;
-  sw.dx = dx; const row = sw.el.querySelector('.srow'); const base = sw.el.classList.contains('open') ? 198 : 0;
-  row.style.transition = 'none'; row.style.transform = 'translateX(' + Math.max(0, Math.min(220, base + dx)) + 'px)';
+  sw.dx = dx;
+  let x = (sw.el.classList.contains('open') ? SW_W : 0) + dx;
+  if (x > SW_W) x = SW_W + (x - SW_W) * 0.25; if (x < 0) x = x * 0.25;
+  sw.row.style.transition = 'none'; sw.row.style.transform = 'translateX(' + x + 'px)';
+  sw.act.style.transition = 'none'; sw.act.style.opacity = Math.max(0, Math.min(1, x / SW_W));
 }, { passive: true });
-root.addEventListener('touchend', () => {
-  if (!sw) return; const row = sw.el.querySelector('.srow'); row.style.transition = ''; row.style.transform = '';
-  if (sw.lock === 'x') { const id = sw.el.dataset.sw; const wasOpen = ui.swipeOpen === id; if (!wasOpen && sw.dx > 50) ui.swipeOpen = id; else if (wasOpen && sw.dx < -40) ui.swipeOpen = null; render(); }
-  sw = null;
-});
+function swipeEnd() {
+  if (!sw) return; const s = sw; sw = null;
+  if (s.lock !== 'x') return;
+  const wasOpen = s.el.classList.contains('open');
+  const fast = Math.abs(s.dx) / Math.max(1, Date.now() - s.t) > 0.5;
+  const open = wasOpen ? !(s.dx < -40 || (fast && s.dx < 0)) : (s.dx > 70 || (fast && s.dx > 20));
+  s.row.style.transition = ''; s.act.style.transition = '';
+  s.el.classList.toggle('open', open);
+  s.row.style.transform = ''; s.act.style.opacity = '';
+  ui.swipeOpen = open ? s.el.dataset.sw : null;
+}
+root.addEventListener('touchend', swipeEnd);
+root.addEventListener('touchcancel', swipeEnd);
 
 // נגן
 AU.player.addEventListener('timeupdate', () => {
