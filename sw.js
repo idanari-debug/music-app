@@ -1,7 +1,7 @@
 // שומר את קבצי האפליקציה במכשיר כדי שתיפתח גם בלי קליטה.
 // לא שומר שום תוכן: השירים נשמרים מוצפנים בנפרד, וההקלטות לא נשמרות כאן.
-const V = 'megira-v4';
-const SHELL = ['./', 'index.html', 'css/app.css', 'manifest.webmanifest', 'js/app.js', 'js/api.js', 'js/store.js', 'js/db.js', 'js/crypto.js', 'js/chords.js', 'js/audio.js', 'js/importer.js', 'js/config.js', 'js/passkey.js', 'icons/icon-192.png', 'icons/apple-touch-icon.png', 'icons/favicon.png'];
+const V = 'megira-v5';
+const SHELL = ['./', 'index.html', 'css/app.css', 'manifest.webmanifest', 'js/app.js', 'js/api.js', 'js/store.js', 'js/db.js', 'js/crypto.js', 'js/chords.js', 'js/audio.js', 'js/importer.js', 'js/config.js', 'js/passkey.js', 'js/theme.js', 'icons/icon-192.png', 'icons/apple-touch-icon.png', 'icons/favicon.png'];
 
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())); });

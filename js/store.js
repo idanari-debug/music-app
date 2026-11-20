@@ -4,16 +4,64 @@ import * as C from './crypto.js';
 import { CONFIG } from './config.js';
 import { kv, songsCache, recsCache, outbox, wipeLocal } from './db.js';
 
-export const STAGES = [
-  { k: 'ready', name: 'מוכן', dot: '#2E9E5B' },
-  { k: 'close', name: 'קרוב', dot: '#6B5CE7' },
-  { k: 'dev', name: 'בפיתוח', dot: '#FF5A1F' },
-  { k: 'trans', name: 'תרגום', dot: '#2F86D6' },
-  { k: 'spark', name: 'ניצוץ', dot: '#E0A100' },
-  { k: 'raw', name: 'חומר גלם', dot: '#D94C8A' },
-  { k: 'bottom', name: 'המגירה התחתונה', dot: '#8A8882' }
+// זיגוגים: הצבע עצמו מוגדר בקובץ העיצוב, פעם ליום ופעם ללילה
+export const GLAZES = [
+  { k: 'celadon', name: 'סלדון' }, { k: 'lilac', name: 'לילך' }, { k: 'terra', name: 'טרקוטה' },
+  { k: 'ash', name: 'תכלת אפר' }, { k: 'ochre', name: 'אוקר' }, { k: 'rose', name: 'ורוד עפר' },
+  { k: 'stone', name: 'אבן' }, { k: 'moss', name: 'טחב' }, { k: 'plum', name: 'שזיף' }, { k: 'slate', name: 'צפחה' }
 ];
-export const stageOf = k => STAGES.find(s => s.k === k) || STAGES[5];
+export const glazeVar = g => 'var(--g-' + (GLAZES.some(x => x.k === g) ? g : 'stone') + ')';
+
+// המגירות הקבועות של גרסה 1. המפתחות נשמרים כמו שהם, כדי שכל שיר קיים יישאר במגירה שלו.
+const DEFAULT_DRAWERS = [
+  { k: 'ready', name: 'מוכן', glaze: 'celadon' },
+  { k: 'close', name: 'קרוב', glaze: 'lilac' },
+  { k: 'dev', name: 'בפיתוח', glaze: 'terra' },
+  { k: 'trans', name: 'תרגום', glaze: 'ash' },
+  { k: 'spark', name: 'ניצוץ', glaze: 'ochre' },
+  { k: 'raw', name: 'חומר גלם', glaze: 'rose' },
+  { k: 'bottom', name: 'המגירה התחתונה', glaze: 'stone' }
+];
+
+// ההגדרות האישיות (מגירות וסדר ידני) נשמרות כרשומה מוצפנת אחת בתוך טבלת השירים,
+// באותה הצפנה בדיוק. כך לא צריך שום שינוי בשרת, והן נכנסות גם לגיבוי.
+const isMeta = s => !!(s && s.data && s.data.__meta);
+export function metaRec() {
+  let best = null;
+  for (const s of S.songs.values()) if (isMeta(s) && !s.deleted_at && (!best || (s.data.editedAt || '') > (best.data.editedAt || ''))) best = s;
+  return best;
+}
+export const meta = () => (metaRec() || { data: {} }).data;
+export async function saveMeta(patch) {
+  const m = metaRec();
+  const data = Object.assign({ __meta: true, title: '__meta', drawers: null, order: {} }, m ? m.data : {}, patch);
+  await saveSong(m ? m.id : uid(), data);
+}
+export function drawers() {
+  const d = meta().drawers;
+  if (!Array.isArray(d) || !d.length) return DEFAULT_DRAWERS;
+  const list = d.filter(x => x.k !== 'bottom');
+  return list.concat(d.find(x => x.k === 'bottom') || DEFAULT_DRAWERS[6]);
+}
+export async function saveDrawers(list) {
+  const rest = list.filter(x => x.k !== 'bottom');
+  const bottom = list.find(x => x.k === 'bottom') || DEFAULT_DRAWERS[6];
+  await saveMeta({ drawers: rest.concat(bottom).map(x => ({ k: x.k, name: String(x.name || '').trim() || 'מגירה', glaze: x.glaze || 'stone' })) });
+}
+export function stageOf(k) {
+  const ds = drawers();
+  return ds.find(s => s.k === k) || ds.find(s => s.k === 'raw') || ds[ds.length - 1];
+}
+export const orderOf = k => ((meta().order || {})[k]) || [];
+export async function saveOrder(k, ids) { const o = Object.assign({}, meta().order || {}); o[k] = ids; await saveMeta({ order: o }); }
+
+// משימות לשיר. שיר ישן שיש לו רק "צעד הבא" מקבל אותו כמשימה ראשונה.
+export const TASK_TYPES = ['כתיבה', 'הקלטה', 'הפקה', 'אחר'];
+export function tasksOf(s) {
+  if (Array.isArray(s.data.tasks)) return s.data.tasks;
+  return s.data.next ? [{ id: 'n0', text: s.data.next, type: 'אחר', done: false }] : [];
+}
+export const nextOf = s => { const t = tasksOf(s).find(x => !x.done); return t ? t.text : ''; };
 export const POTS = ['גבוה', 'בינוני', 'נמוך', 'צדדי'];
 export const KINDS = [
   { k: 'sketch', name: 'סקיצה' },
@@ -202,8 +250,8 @@ async function queue(kind, id, row) {
 }
 
 // ---------- שירים ----------
-export const songs = () => [...S.songs.values()].filter(s => !s.deleted_at);
-export const trashedSongs = () => [...S.songs.values()].filter(s => s.deleted_at);
+export const songs = () => [...S.songs.values()].filter(s => !s.deleted_at && !isMeta(s));
+export const trashedSongs = () => [...S.songs.values()].filter(s => s.deleted_at && !isMeta(s));
 export const recsOf = id => [...S.recs.values()].filter(r => r.song_id === id && !r.deleted_at).sort((a, b) => (b.meta.date || '').localeCompare(a.meta.date || ''));
 export const trashedRecs = () => [...S.recs.values()].filter(r => r.deleted_at && !(S.songs.get(r.song_id) || {}).deleted_at);
 
@@ -338,7 +386,7 @@ export async function makeBackup(full) {
   const payload = { songs: songsOut, recordings: recsOut, full: !!full };
   return {
     format: 'megira-backup-enc-v1', created: new Date().toISOString(),
-    counts: { songs: songsOut.length, recordings: recsOut.length, audio: full ? recsOut.length : 0 },
+    counts: { songs: songsOut.filter(x => !(x.data && x.data.__meta)).length, recordings: recsOut.length, audio: full ? recsOut.length : 0 },
     keys: { kdf_salt: row.kdf_salt, kdf_iterations: row.kdf_iterations, wrapped_key_password: row.wrapped_key_password, recovery_salt: row.recovery_salt, wrapped_key_recovery: row.wrapped_key_recovery, key_check: row.key_check },
     data: await C.encJSON(key, payload)
   };
@@ -360,7 +408,7 @@ export async function restoreBackup(payload, onProgress) {
   let songsAdded = 0, songsRestored = 0, audio = 0, skipped = 0;
   for (const s of payload.songs) {
     const cur = S.songs.get(s.id);
-    if (!cur) { await saveSong(s.id, s.data, { logEntry: 'שוחזר מגיבוי', deleted_at: null }); songsAdded++; }
+    if (!cur) { await saveSong(s.id, s.data, { logEntry: s.data && s.data.__meta ? null : 'שוחזר מגיבוי', deleted_at: null }); if (!(s.data && s.data.__meta)) songsAdded++; }
     else if (cur.deleted_at && !s.deleted_at) { await saveSong(s.id, cur.data, { logEntry: 'שוחזר מסל המחזור בעזרת גיבוי', deleted_at: null }); songsRestored++; }
     onProgress && onProgress();
   }
