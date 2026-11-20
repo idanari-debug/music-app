@@ -305,7 +305,7 @@ export async function restoreSong(id) {
 export async function purgeSong(id) {
   await flush();
   for (const r of [...S.recs.values()].filter(r => r.song_id === id)) {
-    try { await api.removeFile(r.path); } catch (e) {}
+    for (const p of partPaths(r)) { try { await api.removeFile(p); } catch (e) {} }
   }
   await api.deleteSong(id);
   S.songs.delete(id);
@@ -315,13 +315,36 @@ export async function purgeSong(id) {
 }
 
 // ---------- הקלטות ----------
-export async function addRecording(songId, bytes, meta) {
+// קובץ כבד מתפצל לחתיכות מוצפנות, כל אחת מתחת למגבלת השרת. חתיכה ראשונה בנתיב הרגיל, השאר עם סיומת מספר.
+const PART = 45 * 1048576;
+export const partPaths = r => { const n = (r.meta && r.meta.parts) || 1; const out = [r.path]; for (let i = 1; i < n; i++) out.push(r.path + '.' + i); return out; };
+async function retry(fn, tries = 4) {
+  for (let i = 0; ; i++) {
+    try { return await fn(); }
+    catch (e) { if (i >= tries - 1) throw e; await new Promise(r => setTimeout(r, 1200 * (i + 1))); }
+  }
+}
+export async function addRecording(songId, bytes, meta, onProgress) {
   const id = uid();
   const u = api.currentUser();
   const path = u.id + '/' + id + '.bin';
-  const encd = await C.encBytes(key, bytes);
-  await api.uploadFile(path, encd);
-  meta = Object.assign({ size: encd.length, date: new Date().toISOString() }, meta);
+  const n = Math.max(1, Math.ceil(bytes.length / PART));
+  const done = [];
+  let size = 0;
+  try {
+    for (let i = 0; i < n; i++) {
+      const p = i ? path + '.' + i : path;
+      const encd = await C.encBytes(key, bytes.subarray(i * PART, Math.min(bytes.length, (i + 1) * PART)));
+      await retry(() => api.uploadFile(p, encd));
+      done.push(p); size += encd.length;
+      onProgress && onProgress((i + 1) / n, i + 1, n);
+    }
+  } catch (e) {
+    for (const p of done) { try { await api.removeFile(p); } catch (x) {} }
+    throw e;
+  }
+  meta = Object.assign({ size, date: new Date().toISOString() }, meta);
+  if (n > 1) meta.parts = n; else delete meta.parts;
   const row = { id, song_id: songId, storage_path: path, enc_meta: await C.encJSON(key, meta), deleted_at: null };
   await api.upsertRecording(row);
   const rec = { id, song_id: songId, path, meta, created_at: meta.date, deleted_at: null };
@@ -345,7 +368,9 @@ export async function updateRecording(id, metaPatch, deleted_at) {
 export async function purgeRecording(id) {
   await flush();
   const r = S.recs.get(id);
-  await api.removeFile(r.path);
+  const ps = partPaths(r);
+  await api.removeFile(ps[0]);
+  for (const p of ps.slice(1)) { try { await api.removeFile(p); } catch (e) {} }
   await api.deleteRecording(id);
   S.recs.delete(id); await recsCache.del(id);
   emit();
@@ -355,14 +380,20 @@ const audioCache = new Map();
 export async function recordingUrl(id) {
   if (audioCache.has(id)) return audioCache.get(id);
   const r = S.recs.get(id);
-  const bytes = await C.decBytes(key, await api.downloadFile(r.path));
+  const bytes = await recordingBytes(id);
   const url = URL.createObjectURL(new Blob([bytes], { type: r.meta.mime || 'audio/mp4' }));
   audioCache.set(id, url);
   return url;
 }
 export async function recordingBytes(id) {
   const r = S.recs.get(id);
-  return C.decBytes(key, await api.downloadFile(r.path));
+  const ps = partPaths(r);
+  if (ps.length === 1) return C.decBytes(key, await api.downloadFile(r.path));
+  const parts = [];
+  for (const p of ps) parts.push(await C.decBytes(key, await retry(() => api.downloadFile(p))));
+  const out = new Uint8Array(parts.reduce((a, b) => a + b.length, 0));
+  let o = 0; for (const b of parts) { out.set(b, o); o += b.length; }
+  return out;
 }
 
 export const storageUsed = () => [...S.recs.values()].reduce((a, r) => a + (r.meta.size || 0), 0);
@@ -417,7 +448,7 @@ export async function restoreBackup(payload, onProgress) {
     if (!r.data) continue;
     if (have.has(r.meta.date + '|' + r.song_id + '|' + (r.meta.size || '')) || [...S.recs.values()].some(x => x.id === r.id)) { skipped++; continue; }
     if (!S.songs.get(r.song_id)) continue;
-    const m = Object.assign({}, r.meta); delete m.size;
+    const m = Object.assign({}, r.meta); delete m.size; delete m.parts;
     await addRecording(r.song_id, C.b64.dec(r.data), m);
     audio++; onProgress && onProgress();
   }

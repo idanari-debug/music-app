@@ -641,6 +641,24 @@ function vSheet() {
     h = `<h3>${sh.type === 'uploadKind' ? 'מה זה הקובץ הזה?' : 'מה הקלטת עכשיו?'}</h3>
     <div class="field"><label for="rn">שם</label><input class="inp" id="rn" value="${esc(sh.name || '')}"></div>
     <div class="box">${KINDS.map(k => `<button class="row" data-a="${sh.type === 'uploadKind' ? 'uploadAs' : 'recAs'}" data-k="${k.k}"><span class="grow"><span class="t">${k.name}</span></span>${I.chev}</button>`).join('')}</div>`;
+  } else if (sh.type === 'uploadHow') {
+    const used = store.storageUsed(), lim = CONFIG.storageLimitBytes;
+    const after = used + (sh.pick === 'small' ? sh.small : sh.size);
+    const parts = Math.ceil(sh.size / (45 * 1048576));
+    const opt = (k, t, dsc, size, tag) => `<button class="opt ${sh.pick === k ? 'on' : ''}" data-a="upPick" data-k="${k}"><span class="radio"><span></span></span><span class="grow"><span class="ot"><b>${t}</b>${tag ? '<span class="tagx">' + tag + '</span>' : ''}</span><span class="od">${dsc}</span><span class="os">${size}</span></span></button>`;
+    h = `${upCard(sh)}<h3>איך לשמור את הקובץ?</h3>
+    <p class="hint" style="margin:-6px 0 0;font-size:13px;line-height:1.6">${sh.canC ? 'הקובץ לא מכווץ, ולכן כבד. אפשר לכווץ אותו כאן בטלפון, לפני ההצפנה, או לשמור את המקור כמו שהוא.' : sh.lossless ? 'הדפדפן הזה לא יודע לכווץ קבצים, אז הקובץ יישמר במקור, מחולק לחתיכות.' : 'הקובץ כבר מכווץ, אבל גדול מהמגבלה של השרת. הוא יישמר כמו שהוא, מחולק לחתיכות.'}</p>
+    ${sh.canC ? opt('small', 'לכווץ', 'נשמע זהה באוזניות ובהשמעה. מתאים לסקיצות, רעיונות ופגישות השמעה.', mb(sh.size) + ' מ״ב ← כ־' + mb(sh.small) + ' מ״ב', 'לסקיצות') : ''}
+    ${opt('orig', 'לשמור מקור', 'הקובץ נשמר בדיוק כמו שהוא. מתאים לקבצים שהולכים להפקה ולמיקס.', mb(sh.size) + ' מ״ב' + (parts > 1 ? ' · ' + (parts === 2 ? 'שתי חתיכות' : parts + ' חתיכות') : ''), '')}
+    <div class="upstore"><div class="meter"><span style="width:${Math.min(100, after / lim * 100).toFixed(1)}%;${after / lim >= .8 ? 'background:var(--acc)' : ''}"></span></div><span>אחסון אחרי ההעלאה: ${mb(after)} מ״ב מתוך ג׳יגה</span></div>
+    <button class="btn pri full" style="height:54px;font-size:16px" data-a="upGo">${sh.pick === 'small' ? 'לכווץ ולהעלות' : 'להעלות מקור'}</button>`;
+  } else if (sh.type === 'uploadWork') {
+    const steps = sh.small ? ['מכווץ בטלפון', 'מצפין ומעלה'] : [sh.parts > 1 ? 'מצפין ומעלה · חתיכה 1 מתוך ' + sh.parts : 'מצפין ומעלה'];
+    h = `${upCard(sh)}<h3>${sh.small ? 'מכין את הסקיצה' : 'מעלה את המקור'}</h3>
+    ${steps.map((t, i) => `<div class="upstep ${i === 0 ? 'on' : ''}"><div class="ul"><span id="upt${i}">${t}</span><span id="upr${i}" class="num">0%</span></div><div class="meter"><span id="upb${i}" style="width:0%"></span></div></div>`).join('')}
+    <p class="hint" style="margin:0;font-size:12px;line-height:1.6">כדאי להשאיר את המסך פתוח עד הסוף. אם הרשת נופלת לרגע, כל חתיכה מנסה שוב לבד.</p>`;
+  } else if (sh.type === 'uploadDone') {
+    h = `<div class="updone"><span class="ok pop">${I.check || '✓'}</span><b>נשמר במגירה</b><span class="hint">${esc(sh.txt)}</span></div>`;
   } else if (sh.type === 'recMenu') {
     const r = S.recs.get(sh.id);
     h = `<h3>${esc(r.meta.name || kindName(r.meta.kind))}</h3>
@@ -796,14 +814,50 @@ async function stopRec() {
   pendingRec = r;
   openSheet({ type: 'recKind', name: 'סקיצה ' + dmy(new Date().toISOString()) });
 }
-async function saveRecording(blob, mime, kind, name, songId, durationHint) {
-  toast('מצפין ומעלה…');
-  const a = await AU.analyze(blob);
+async function saveRecording(blob, mime, kind, name, songId, durationHint, pre, onProgress) {
+  if (!onProgress) toast('מצפין ומעלה…');
+  const a = pre ? { bytes: new Uint8Array(await blob.arrayBuffer()), duration: pre.duration, peaks: pre.peaks } : await AU.analyze(blob);
   let sid = songId;
   if (!sid || !song(sid)) sid = await store.createSong({ title: 'ניצוץ ' + dmy(new Date().toISOString()) + ' ' + hm(new Date().toISOString()), stage: 'spark' });
-  await store.addRecording(sid, a.bytes, { kind, name, mime: mime || blob.type || 'audio/mp4', duration: a.duration || durationHint || null, peaks: a.peaks });
+  await store.addRecording(sid, a.bytes, { kind, name, mime: mime || blob.type || 'audio/mp4', duration: a.duration || durationHint || null, peaks: a.peaks }, onProgress);
   await patchSong(sid, {}, 'נוספה הקלטה: ' + (name || kindName(kind)));
-  toast('ההקלטה נשמרה בכספת');
+  if (!onProgress) toast('ההקלטה נשמרה בכספת');
+  return sid;
+}
+
+// העלאת קובץ כבד: כיווץ במכשיר או מקור בחתיכות
+const MAX_UPLOAD = 400 * 1048576;
+const upCard = sh => `<div class="upcard"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 7v10"/></svg></span><span class="grow"><b>${esc(sh.name)}</b><span class="hint">${[fmtDur(sh.dur), mb(sh.size) + ' מ״ב'].filter(Boolean).join(' · ')}</span></span></div>`;
+const fmtDur = sec => sec ? Math.floor(sec / 60) + ':' + String(Math.round(sec % 60)).padStart(2, '0') + ' דקות' : '';
+function upSet(i, frac, label) {
+  const b = document.getElementById('upb' + i), r = document.getElementById('upr' + i), t = document.getElementById('upt' + i);
+  if (b) b.style.width = Math.round(frac * 100) + '%';
+  if (r) r.textContent = Math.round(frac * 100) + '%';
+  if (t && label) t.textContent = label;
+  document.querySelectorAll('.upstep').forEach((el, j) => el.classList.toggle('on', j === i));
+}
+async function runUpload(f, sh) {
+  const small = sh.pick === 'small';
+  ui.sheet = { type: 'uploadWork', small, name: sh.name, size: sh.size, dur: sh.dur, parts: Math.ceil(sh.size / (45 * 1048576)) };
+  render();
+  let blob = f, mime = f.type, pre = null;
+  if (small) {
+    try {
+      const c = await AU.compress(f, x => upSet(0, x));
+      blob = c.blob; mime = 'audio/aac'; pre = { duration: c.duration, peaks: c.peaks };
+      upSet(0, 1);
+    } catch (e) {
+      console.error(e);
+      if (f.size > MAX_UPLOAD) { closeSheet(); toast('הכיווץ לא הצליח, והמקור גדול מ־400 מ״ב'); return; }
+      toast('הכיווץ לא הצליח. מעלה את המקור, באיכות מלאה');
+      ui.sheet = Object.assign({}, ui.sheet, { small: false, parts: Math.ceil(f.size / (45 * 1048576)) }); render();
+    }
+  }
+  const si = ui.sheet.small ? 1 : 0;
+  const sid = await saveRecording(blob, mime, sh.k, sh.name, ui.songId, sh.dur, pre, (x, i, n) => upSet(si, x, n > 1 ? 'מצפין ומעלה · חתיכה ' + Math.min(n, i + 1) + ' מתוך ' + n : null));
+  ui.sheet = { type: 'uploadDone', txt: mb(blob.size) + ' מ״ב · מוצפן' + (ui.sheet.small ? '' : ' · באיכות מלאה') };
+  render();
+  setTimeout(() => { if (ui.sheet && ui.sheet.type === 'uploadDone') closeSheet(); }, 1400);
   return sid;
 }
 
@@ -946,8 +1000,27 @@ const A = {
     catch (e) { fail(e); pendingRec = r; download('הקלטה-' + Date.now() + '.m4a', r.blob); toast('ההעלאה נכשלה. ההקלטה נשמרה כקובץ בטלפון'); }
   },
   async uploadAs(d) {
-    const name = ($('#rn') || {}).value || kindName(d.k); const f = pendingUpload; pendingUpload = null; ui.sheet = null; render();
-    try { if (f.size > 50 * 1048576) throw new Error('הקובץ גדול מ־50 מ״ב'); await saveRecording(f, f.type, d.k, name, ui.songId); render(); } catch (e) { fail(e); }
+    const name = ($('#rn') || {}).value || kindName(d.k); const f = pendingUpload;
+    if (!f) return;
+    const lossless = AU.isLossless(f);
+    if (!lossless && f.size <= 50 * 1048576) {
+      pendingUpload = null; ui.sheet = null; render();
+      try { await saveRecording(f, f.type, d.k, name, ui.songId); render(); } catch (e) { fail(e); }
+      return;
+    }
+    const canC = lossless && await AU.canCompress();
+    if (!canC && f.size > MAX_UPLOAD) { pendingUpload = null; ui.sheet = null; render(); return toast('הקובץ גדול מ־400 מ״ב. כדאי לייצא אותו קצר או מכווץ יותר'); }
+    const est = await AU.estimate(f);
+    ui.sheet = { type: 'uploadHow', k: d.k, name, size: f.size, dur: est.duration, small: est.small, canC, lossless, pick: canC ? 'small' : 'orig' };
+    render();
+  },
+  upPick(d) { if (ui.sheet && ui.sheet.type === 'uploadHow') { ui.sheet.pick = d.k; render(); } },
+  async upGo() {
+    const sh = ui.sheet, f = pendingUpload; if (!sh || !f) return;
+    if (sh.pick === 'orig' && f.size > MAX_UPLOAD) return toast('מקור מעל 400 מ״ב לא נכנס. אפשר לבחור כיווץ');
+    pendingUpload = null;
+    try { await runUpload(f, sh); render(); }
+    catch (e) { ui.sheet = null; render(); fail(e); }
   },
   beatLink() { openSheet({ type: 'beat' }); },
   async beatDel(d) { const s = song(ui.songId); const beats = (s.data.beats || []).filter(b => b.id !== d.id); await patchSong(s.id, { beats }, 'הוסר קישור לטייפ ביט'); render(); },
@@ -1023,7 +1096,7 @@ const A = {
   },
   newRk() { confirmSheet('ליצור מפתח שחזור חדש?', 'המפתח הקודם יפסיק לעבוד מיד.', 'יצירה', async () => { try { const row = await store.vaultState(); const rk = await store.newRecovery(row); openSheet({ type: 'rk', rk }); } catch (e) { fail(e); } }, false); },
   closeSheet() { closeSheet(); },
-  overlay(d, el, ev) { if (ev.target === el && ui.sheet && !['import', 'recKind', 'uploadKind'].includes(ui.sheet.type)) closeSheet(); },
+  overlay(d, el, ev) { if (ev.target === el && ui.sheet && !['import', 'recKind', 'uploadKind', 'uploadHow', 'uploadWork', 'uploadDone'].includes(ui.sheet.type)) closeSheet(); },
   async confirmYes() { const fn = ui.sheet.fn; await fn(); }
 };
 

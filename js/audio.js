@@ -61,6 +61,115 @@ export async function analyze(blob) {
   return { bytes: new Uint8Array(buf), duration, peaks };
 }
 
+// ---------- כיווץ במכשיר (לפני ההצפנה) ----------
+// קבצים לא מכווצים (ווייב, איף, פלאק) הופכים לקובץ מכווץ באיכות גבוהה בעזרת המקודד של הדפדפן עצמו.
+// שום דבר לא יוצא מהמכשיר לפני ההצפנה. אם משהו לא תקין, חוזרים למקור.
+const LOSSLESS = /\.(wav|wave|aif|aiff|aifc|flac)$/i;
+export const isLossless = f => LOSSLESS.test(f.name || '') || /wav|aiff|flac/i.test(f.type || '');
+
+export async function canCompress() {
+  if (typeof AudioEncoder === 'undefined' || typeof AudioData === 'undefined') return false;
+  try { return !!(await AudioEncoder.isConfigSupported({ codec: 'mp4a.40.2', sampleRate: 48000, numberOfChannels: 2, bitrate: 256000 })).supported; }
+  catch (e) { return false; }
+}
+
+// הערכת משך וגודל לפני הבחירה, בלי לפענח את כל הקובץ
+export async function estimate(f) {
+  let dur = null;
+  try {
+    if (/\.(wav|wave)$/i.test(f.name || '') || /wav/i.test(f.type || '')) {
+      const v = new DataView(await f.slice(0, 65536).arrayBuffer());
+      let o = 12, byteRate = 0, dataLen = 0;
+      while (o + 8 <= v.byteLength) {
+        const id = String.fromCharCode(v.getUint8(o), v.getUint8(o + 1), v.getUint8(o + 2), v.getUint8(o + 3));
+        const len = v.getUint32(o + 4, true);
+        if (id === 'fmt ') byteRate = v.getUint32(o + 16, true);
+        if (id === 'data') { dataLen = Math.min(len, f.size - o - 8); break; }
+        o += 8 + len + (len & 1);
+      }
+      if (byteRate) dur = (dataLen || f.size) / byteRate;
+    }
+  } catch (e) {}
+  const ratio = /\.(flac)$/i.test(f.name || '') ? 0.32 : 0.18;
+  const small = dur ? Math.round(dur * 256000 / 8 * 1.02) : Math.round(f.size * ratio);
+  return { duration: dur, small };
+}
+
+const SR = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+export function adtsWrap(frames, asc) {
+  // frames: מערך של מסגרות גולמיות. asc: שני הבתים של הגדרת המקודד
+  const prof = asc[0] >> 3, fi = ((asc[0] & 7) << 1) | (asc[1] >> 7), ch = (asc[1] >> 3) & 15;
+  let total = 0; for (const f of frames) total += f.length + 7;
+  const out = new Uint8Array(total); let o = 0;
+  for (const f of frames) {
+    const L = f.length + 7;
+    out[o] = 0xFF; out[o + 1] = 0xF1;
+    out[o + 2] = ((prof - 1) << 6) | (fi << 2) | (ch >> 2);
+    out[o + 3] = ((ch & 3) << 6) | (L >> 11);
+    out[o + 4] = (L >> 3) & 0xFF;
+    out[o + 5] = ((L & 7) << 5) | 0x1F;
+    out[o + 6] = 0xFC;
+    out.set(f, o + 7); o += L;
+  }
+  return out;
+}
+
+async function decode(buf) {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AC();
+  try { return await new Promise((res, rej) => { const p = ctx.decodeAudioData(buf, res, rej); if (p && p.then) p.then(res, rej); }); }
+  finally { ctx.close && ctx.close(); }
+}
+function peaksOf(audio) {
+  const ch = audio.getChannelData(0); const N = 72, step = Math.max(1, Math.floor(ch.length / N)); let peaks = [];
+  for (let i = 0; i < N; i++) { let m = 0; for (let j = i * step, e = Math.min(ch.length, (i + 1) * step); j < e; j += 16) { const v = Math.abs(ch[j]); if (v > m) m = v; } peaks.push(m); }
+  const mx = Math.max(0.01, ...peaks); return peaks.map(p => Math.round((p / mx) * 100) / 100);
+}
+
+export async function compress(file, onProgress) {
+  const audio = await decode(await file.arrayBuffer());
+  const sampleRate = audio.sampleRate, nch = Math.min(2, audio.numberOfChannels), total = audio.length;
+  const frames = []; let asc = null, err = null;
+  const enc = new AudioEncoder({
+    output: (chunk, md) => {
+      const b = new Uint8Array(chunk.byteLength); chunk.copyTo(b);
+      if (md && md.decoderConfig && md.decoderConfig.description && !asc) { const d = md.decoderConfig.description; asc = (ArrayBuffer.isView(d) ? new Uint8Array(d.buffer, d.byteOffset, d.byteLength) : new Uint8Array(d)).slice(0, 2); }
+      frames.push(b);
+    },
+    error: e => { err = e; }
+  });
+  enc.configure({ codec: 'mp4a.40.2', sampleRate, numberOfChannels: nch, bitrate: nch > 1 ? 256000 : 160000 });
+  const planes = []; for (let c = 0; c < nch; c++) planes.push(audio.getChannelData(c));
+  const STEP = 8192;
+  for (let s = 0; s < total; s += STEP) {
+    if (err) throw err;
+    const n = Math.min(STEP, total - s);
+    const data = new Float32Array(n * nch);
+    for (let c = 0; c < nch; c++) data.set(planes[c].subarray(s, s + n), c * n);
+    const ad = new AudioData({ format: 'f32-planar', sampleRate, numberOfFrames: n, numberOfChannels: nch, timestamp: Math.round(s / sampleRate * 1e6), data });
+    enc.encode(ad); ad.close();
+    while (enc.encodeQueueSize > 24) await new Promise(r => setTimeout(r, 4));
+    if (onProgress && (s / STEP) % 20 === 0) { onProgress(s / total); await new Promise(r => setTimeout(r, 0)); }
+  }
+  await enc.flush(); enc.close();
+  if (err) throw err;
+  if (!frames.length) throw new Error('empty');
+  // אם הדפדפן כבר עטף את המסגרות, לא עוטפים שוב
+  const already = frames[0][0] === 0xFF && (frames[0][1] & 0xF0) === 0xF0;
+  if (!already && !asc) {
+    const fi = SR.indexOf(sampleRate); if (fi < 0) throw new Error('rate');
+    asc = new Uint8Array([(2 << 3) | (fi >> 1), ((fi & 1) << 7) | (nch << 3)]);
+  }
+  let out;
+  if (already) { let t = 0; frames.forEach(f => t += f.length); out = new Uint8Array(t); let o = 0; frames.forEach(f => { out.set(f, o); o += f.length; }); }
+  else out = adtsWrap(frames, asc);
+  // בדיקה: הקובץ החדש חייב להתפענח ולהיות באורך של המקור
+  const check = await decode(out.buffer.slice(0));
+  if (!check || Math.abs(check.duration - audio.duration) > Math.max(0.5, audio.duration * 0.02)) throw new Error('verify');
+  onProgress && onProgress(1);
+  return { blob: new Blob([out], { type: 'audio/aac' }), duration: audio.duration, peaks: peaksOf(audio) };
+}
+
 // נגן יחיד
 export const player = new Audio();
 player.preload = 'auto';
