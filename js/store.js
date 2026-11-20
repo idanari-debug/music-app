@@ -105,6 +105,15 @@ export async function newRecovery(row) {
 
 export async function rememberHere() { if (key) await kv.set('mk', await C.nonExtractableCopy(key)); }
 
+export async function masterFromPass(passphrase, row) {
+  let k;
+  try { k = await C.unwrap(row.wrapped_key_password, await C.deriveKek(passphrase, row.kdf_salt, row.kdf_iterations)); }
+  catch (e) { throw new Error('סיסמת הכספת שגויה'); }
+  await checkKey(k, row);
+  return k;
+}
+export async function unlockWithKey(k, row) { await checkKey(k, row); key = k; }
+
 export async function tryRemembered(row) {
   const k = await kv.get('mk');
   if (!k || !row) return false;
@@ -312,3 +321,57 @@ export const storageUsed = () => [...S.recs.values()].reduce((a, r) => a + (r.me
 
 window.addEventListener('online', () => { S.online = true; sync(); });
 window.addEventListener('offline', () => { S.online = false; emit(); });
+
+// ---------- גיבוי מוצפן ----------
+// הקובץ מכיל את התוכן מוצפן במפתח הכספת, ואת המפתח עצמו עטוף בסיסמת הכספת ובמפתח השחזור.
+// כך הגיבוי נפתח גם אם הענן ייעלם לגמרי, אבל רק למי שיודע את הסיסמה או מחזיק את מפתח השחזור.
+export async function makeBackup(full) {
+  const row = await kv.get('keys');
+  const songsOut = [...S.songs.values()].map(s => ({ id: s.id, deleted_at: s.deleted_at, data: s.data }));
+  const recs = [...S.recs.values()].filter(r => !r.deleted_at);
+  const recsOut = [];
+  for (const r of recs) {
+    const o = { id: r.id, song_id: r.song_id, meta: r.meta };
+    if (full) o.data = C.b64.enc(await recordingBytes(r.id));
+    recsOut.push(o);
+  }
+  const payload = { songs: songsOut, recordings: recsOut, full: !!full };
+  return {
+    format: 'megira-backup-enc-v1', created: new Date().toISOString(),
+    counts: { songs: songsOut.length, recordings: recsOut.length, audio: full ? recsOut.length : 0 },
+    keys: { kdf_salt: row.kdf_salt, kdf_iterations: row.kdf_iterations, wrapped_key_password: row.wrapped_key_password, recovery_salt: row.recovery_salt, wrapped_key_recovery: row.wrapped_key_recovery, key_check: row.key_check },
+    data: await C.encJSON(key, payload)
+  };
+}
+
+export async function openBackup(text, secret) {
+  let j; try { j = JSON.parse(text); } catch (e) { throw new Error('זה לא קובץ גיבוי של המגירה'); }
+  if (!j || j.format !== 'megira-backup-enc-v1') throw new Error('זה לא קובץ גיבוי מוצפן של המגירה');
+  try { return { meta: j, payload: await C.decJSON(key, j.data) }; } catch (e) {}
+  if (!secret) { const e = new Error('need-secret'); e.needSecret = true; throw e; }
+  let k = null;
+  try { k = await C.unwrap(j.keys.wrapped_key_password, await C.deriveKek(secret, j.keys.kdf_salt, j.keys.kdf_iterations)); } catch (e) {}
+  if (!k) { try { k = await C.unwrap(j.keys.wrapped_key_recovery, await C.deriveKek(C.normRecovery(secret), j.keys.recovery_salt, j.keys.kdf_iterations)); } catch (e) {} }
+  if (!k) throw new Error('הסיסמה או מפתח השחזור לא מתאימים לגיבוי הזה');
+  return { meta: j, payload: await C.decJSON(k, j.data) };
+}
+
+export async function restoreBackup(payload, onProgress) {
+  let songsAdded = 0, songsRestored = 0, audio = 0, skipped = 0;
+  for (const s of payload.songs) {
+    const cur = S.songs.get(s.id);
+    if (!cur) { await saveSong(s.id, s.data, { logEntry: 'שוחזר מגיבוי', deleted_at: null }); songsAdded++; }
+    else if (cur.deleted_at && !s.deleted_at) { await saveSong(s.id, cur.data, { logEntry: 'שוחזר מסל המחזור בעזרת גיבוי', deleted_at: null }); songsRestored++; }
+    onProgress && onProgress();
+  }
+  const have = new Set([...S.recs.values()].map(r => r.meta.date + '|' + r.song_id + '|' + (r.meta.size || '')));
+  for (const r of payload.recordings) {
+    if (!r.data) continue;
+    if (have.has(r.meta.date + '|' + r.song_id + '|' + (r.meta.size || '')) || [...S.recs.values()].some(x => x.id === r.id)) { skipped++; continue; }
+    if (!S.songs.get(r.song_id)) continue;
+    const m = Object.assign({}, r.meta); delete m.size;
+    await addRecording(r.song_id, C.b64.dec(r.data), m);
+    audio++; onProgress && onProgress();
+  }
+  return { songsAdded, songsRestored, audio, skipped };
+}

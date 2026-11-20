@@ -53,5 +53,5 @@ export const recsCache = table('recs');
 export const outbox = table('outbox');
 
 export async function wipeLocal() {
-  await Promise.all([songsCache.clear(), recsCache.clear(), outbox.clear(), kv.del('mk'), kv.del('keys')]);
+  await Promise.all([songsCache.clear(), recsCache.clear(), outbox.clear(), kv.del('mk'), kv.del('keys'), kv.del('pk')]);
 }

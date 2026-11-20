@@ -5,6 +5,8 @@ import * as CH from './chords.js';
 import * as AU from './audio.js';
 import { readImportFile } from './importer.js';
 import { CONFIG } from './config.js';
+import * as PK from './passkey.js';
+import { kv } from './db.js';
 
 const root = document.getElementById('root');
 const $ = s => root.querySelector(s);
@@ -15,7 +17,7 @@ const ui = {
   screen: 'boot', authMode: 'in', err: '', busy: false, keysRow: null, recoveryKey: '',
   nav: 'home', view: 'dash', drawer: 'ready', songId: null, tab: 'text', sort: 'v',
   editText: false, chordMode: false, showChords: true, q: '', filters: {}, sysView: 'main',
-  sheet: null, versions: null, openLyrics: '', recTarget: null, recTimer: null, swipeOpen: null
+  sheet: null, pkEnrolled: false, autolock: 5, lastBackup: null, hiddenAt: 0, versions: null, openLyrics: '', recTarget: null, recTimer: null, swipeOpen: null
 };
 
 // ---------- עזרים ----------
@@ -142,9 +144,10 @@ function vShowRecovery() {
 }
 function vUnlock() {
   return gate(`
+  ${ui.pkEnrolled ? `<button class="btn pri full" style="height:56px;font-size:16px" data-a="pkUnlock" ${ui.busy ? 'disabled' : ''}>פתיחה בטביעת פנים</button><p class="hint" style="margin:-10px 0 0;text-align:center">או עם סיסמת הכספת:</p>` : ''}
   <form class="card" data-form="unlock">
     <div class="field"><label for="vp">סיסמת כספת</label><input class="inp ltr" id="vp" name="vp" type="password" autocomplete="current-password" required></div>
-    <label class="check"><input type="checkbox" name="remember" checked> להשאיר פתוח במכשיר הזה עד שאנעל ידנית</label>
+    ${ui.pkEnrolled ? '' : '<label class="check"><input type="checkbox" name="remember" checked> להשאיר פתוח במכשיר הזה עד שאנעל ידנית</label>'}
     <button class="btn pri full" type="submit" ${ui.busy ? 'disabled' : ''}>${ui.busy ? 'פותח…' : 'פתיחה'}</button>
   </form>
   <div class="grid2"><button class="btn" data-a="toRecover">שכחתי את הסיסמה</button><button class="btn" data-a="signOut">התנתקות</button></div>`);
@@ -218,6 +221,7 @@ function vDash() {
     <div style="display:flex;gap:8px"><button class="iconbtn" data-a="newSong" aria-label="שיר חדש">${I.plus}</button><button class="pill-dark" data-a="lockNow"><span class="led" style="background:#3DDC84"></span>נעילה</button></div></div>
   <button class="search" data-a="nav" data-k="search">${I.search}<span>חיפוש בשמות, במילים ובהערות</span></button>
   ${list.length === 0 ? `<div class="card"><b>המגירה ריקה</b><p class="hint" style="margin:0">אפשר לייבא את השירים מהפתקים, או להתחיל שיר חדש.</p><div class="grid2"><button class="btn pri" data-a="goImport">ייבוא שירים</button><button class="btn" data-a="newSong">שיר חדש</button></div></div>` : ''}
+  ${list.length && (!ui.lastBackup || daysAgo(ui.lastBackup) > 30) ? `<div class="card" style="gap:10px;border-color:var(--acc);background:var(--acc-bg)"><b>${ui.lastBackup ? 'עבר יותר מחודש מהגיבוי האחרון' : 'עוד לא עשית גיבוי'}</b><p class="hint" style="margin:0">גיבוי מוצפן נשמר אצלך, ונפתח רק עם סיסמת הכספת או מפתח השחזור. גם אם יקרה משהו לענן, החומרים לא ילכו לאיבוד.</p><button class="btn dark" data-a="backup" data-k="full">גיבוי מלא עכשיו</button></div>` : ''}
   ${recent.length ? `<section><div class="lbl"><span>בעבודה עכשיו</span></div><div class="box">${recent.map(s => `
     <button class="row" data-a="open" data-id="${s.id}"><span class="led" style="background:${stageOf(s.data.stage).dot}"></span>
     <span class="grow"><span class="t">${s.data.pinned ? '📌 ' : ''}${esc(s.data.title)}</span><span class="m">${stageOf(s.data.stage).name} · ${rel(s.data.editedAt)}</span></span>
@@ -389,13 +393,16 @@ function vSys() {
     <span style="font-size:12px;color:var(--soft)">${pct >= 80 ? 'מתקרב למגבלה. כדאי להוריד גיבוי ולפנות הקלטות ישנות מהסל.' : 'התראה תופיע כשתגיע ל־80%'}</span></div>
   <div class="box">
     <div class="row" style="cursor:default"><span class="grow"><span class="t">סנכרון</span><span class="m">${!S.online ? 'אין חיבור. כל שינוי נשמר במכשיר ויעלה כשהחיבור יחזור' : S.pending ? S.pending + ' שינויים בדרך לענן' : 'הכל מגובה בענן' + (S.lastSync ? ' · ' + hm(S.lastSync) : '')}</span></span><button class="tb" data-a="syncNow">סנכרון עכשיו</button></div>
-    <button class="row" data-a="backup" data-k="text"><span class="grow"><span class="t">גיבוי טקסטים לקובץ</span><span class="m">כל השירים, המצבים וההערות, בקובץ אחד</span></span>${I.chev}</button>
-    <button class="row" data-a="backup" data-k="full"><span class="grow"><span class="t">גיבוי מלא כולל הקלטות</span><span class="m">קובץ גדול יותר. נשמר אצלך בטלפון ולא מוצפן, לשמור במקום בטוח</span></span>${I.chev}</button>
+    <button class="row" data-a="backup" data-k="text"><span class="grow"><span class="t">גיבוי מוצפן של הטקסטים</span><span class="m">${ui.lastBackup ? 'גיבוי אחרון: ' + rel(ui.lastBackup) : 'עוד לא נעשה גיבוי'}</span></span>${I.lock}</button>
+    <button class="row" data-a="backup" data-k="full"><span class="grow"><span class="t">גיבוי מוצפן מלא, כולל הקלטות</span><span class="m">נפתח רק עם סיסמת הכספת או מפתח השחזור</span></span>${I.lock}</button>
+    <label class="row"><span class="grow"><span class="t">שחזור מגיבוי</span><span class="m">מחזיר שירים והקלטות שחסרים. לא דורס שום דבר קיים</span></span>${I.chev}<input type="file" accept=".json,application/json" class="sr" data-change="restore"></label>
     <button class="row" data-a="sysView" data-k="trash"><span class="grow"><span class="t">סל מחזור</span><span class="m">${tr} פריטים · נמחקים לצמיתות אחרי ${CONFIG.trashDays} יום</span></span>${I.chev}</button>
     <label class="row"><span class="grow"><span class="t">ייבוא שירים מקובץ</span><span class="m">חבילת ייבוא או ייצוא של הפתקים</span></span>${I.chev}<input type="file" accept=".json,.txt,application/json,text/plain" class="sr" data-change="import"></label>
   </div>
   <div class="box">
     <button class="row" data-a="${ui.mfaOn ? 'mfaOff' : 'mfaSetup'}"><span class="grow"><span class="t">אימות דו־שלבי</span><span class="m">${ui.mfaOn ? 'פעיל · כניסה דורשת גם קוד מאפליקציית אימות' : 'כבוי · מומלץ להפעיל'}</span></span><span class="led" style="width:9px;height:9px;background:${ui.mfaOn ? 'var(--ok)' : 'var(--acc)'}"></span></button>
+    <button class="row" data-a="${ui.pkEnrolled ? 'pkOff' : 'pkSetup'}"><span class="grow"><span class="t">פתיחה בטביעת פנים</span><span class="m">${ui.pkEnrolled ? 'פעיל במכשיר הזה' : 'כבוי · במקום להשאיר את הכספת פתוחה'}</span></span><span class="led" style="width:9px;height:9px;background:${ui.pkEnrolled ? 'var(--ok)' : 'var(--acc)'}"></span></button>
+    ${ui.pkEnrolled ? `<button class="row" data-a="autolockSheet"><span class="grow"><span class="t">נעילה אוטומטית</span><span class="m">${ui.autolock === 0 ? 'מיד כשיוצאים מהאפליקציה' : 'אחרי ' + ui.autolock + ' דקות ברקע'}</span></span>${I.chev}</button>` : ''}
     <button class="row" data-a="changePass"><span class="grow"><span class="t">שינוי סיסמת כספת</span></span>${I.chev}</button>
     <button class="row" data-a="newRk"><span class="grow"><span class="t">יצירת מפתח שחזור חדש</span><span class="m">המפתח הקודם יפסיק לעבוד</span></span>${I.chev}</button>
     <button class="row" data-a="lockNow"><span class="grow"><span class="t">נעילה עכשיו</span><span class="m">בפתיחה הבאה תידרש סיסמת הכספת</span></span>${I.lock}</button>
@@ -475,6 +482,19 @@ function vSheet() {
     <form data-form="mfaEnroll" style="display:flex;flex-direction:column;gap:12px">
       <div class="field"><label for="otp2">הקוד שמופיע עכשיו באפליקציה</label><input class="inp ltr" id="otp2" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required style="font-family:var(--mono);font-size:22px;letter-spacing:6px;text-align:center"></div>
       <button class="btn dark full" type="submit">אישור והפעלה</button></form>`;
+  } else if (sh.type === 'pkSetup') {
+    h = `<h3>פתיחה בטביעת פנים</h3>
+    <p class="hint" style="margin:0;font-size:14px">אחרי ההפעלה, הכספת תינעל אוטומטית כשתצא מהאפליקציה, ותיפתח רק בטביעת הפנים שלך. המפתח נשמר רק בטלפון הזה, ולא יוצא ממנו.</p>
+    <form data-form="pkSetup" style="display:flex;flex-direction:column;gap:12px">
+      <div class="field"><label for="pkp">לאישור, סיסמת הכספת</label><input class="inp ltr" id="pkp" name="pass" type="password" autocomplete="current-password" required></div>
+      <button class="btn pri full" type="submit">הפעלה</button></form>`;
+  } else if (sh.type === 'autolock') {
+    h = `<h3>נעילה אוטומטית</h3><div class="box">${[[0, 'מיד כשיוצאים מהאפליקציה'], [1, 'אחרי דקה'], [5, 'אחרי 5 דקות'], [15, 'אחרי 15 דקות']].map(([m, l]) => `<button class="row" data-a="setAutolock" data-k="${m}"><span class="grow"><span class="t">${l}</span></span>${ui.autolock === m ? I.check : ''}</button>`).join('')}</div>`;
+  } else if (sh.type === 'restore') {
+    h = sh.payload ? `<h3>שחזור מגיבוי</h3><p class="hint" style="margin:0;font-size:14px">גיבוי מ־${dmy(sh.meta.created)} ${hm(sh.meta.created)}: ${sh.meta.counts.songs} שירים, ${sh.meta.counts.audio} הקלטות. יוחזרו רק שירים והקלטות שחסרים עכשיו במגירה. שום דבר קיים לא יידרס.</p>
+      <div class="grid2"><button class="btn" data-a="closeSheet">ביטול</button><button class="btn pri" data-a="restoreYes" ${ui.busy ? 'disabled' : ''}>${ui.busy ? 'משחזר…' : 'שחזור'}</button></div>`
+    : `<h3>הגיבוי נוצר בכספת אחרת</h3><p class="hint" style="margin:0;font-size:14px">הקלד את סיסמת הכספת שהייתה בזמן הגיבוי, או את מפתח השחזור.</p>
+      <form data-form="restoreSecret" style="display:flex;flex-direction:column;gap:12px"><div class="field"><label for="rs">סיסמה או מפתח שחזור</label><input class="inp ltr" id="rs" name="secret" type="password" required></div><button class="btn pri full" type="submit">פתיחת הגיבוי</button></form>`;
   } else if (sh.type === 'rk') {
     h = `<h3>מפתח שחזור חדש</h3><div class="rk">${esc(sh.rk)}</div><p class="hint" style="margin:0">המפתח הקודם כבר לא עובד. שמור את החדש מחוץ לטלפון.</p><div class="grid2"><button class="btn" data-a="copyRk2">העתקה</button><button class="btn pri" data-a="closeSheet">שמרתי</button></div>`;
   }
@@ -662,17 +682,17 @@ const A = {
   recPurge(d) { confirmSheet('למחוק את ההקלטה לצמיתות?', 'הקובץ יימחק סופית מהענן. אי אפשר לבטל את זה.', 'מחיקה לצמיתות', async () => { ui.sheet = null; try { await store.purgeRecording(d.id); toast('נמחק לצמיתות'); } catch (e) { fail(e); } render(); }); },
   async backup(d) {
     try {
-      const songsOut = [...S.songs.values()].filter(s => !s.deleted_at).map(s => Object.assign({ id: s.id }, s.data));
-      const out = { format: 'megira-backup-v1', created: new Date().toISOString(), songs: songsOut, recordings: [] };
-      const recs = [...S.recs.values()].filter(r => !r.deleted_at);
-      out.recordings = recs.map(r => ({ id: r.id, song_id: r.song_id, meta: r.meta }));
-      if (d.k === 'full') {
-        toast('אוסף ומפענח ' + recs.length + ' הקלטות…');
-        const { b64 } = await import('./crypto.js');
-        for (const r of out.recordings) r.data = b64.enc(await store.recordingBytes(r.id));
-      }
-      download('המגירה-גיבוי-' + new Date().toISOString().slice(0, 10) + (d.k === 'full' ? '-מלא' : '') + '.json', new Blob([JSON.stringify(out)], { type: 'application/json' }));
-      toast('הגיבוי ירד לטלפון');
+      const full = d.k === 'full';
+      toast(full ? 'מכין גיבוי מלא ומצפין…' : 'מכין גיבוי ומצפין…');
+      const b = await store.makeBackup(full);
+      const name = 'hamegira-backup-' + new Date().toISOString().slice(0, 10) + (full ? '-full' : '') + '.json';
+      const file = new File([JSON.stringify(b)], name, { type: 'application/json' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: 'גיבוי המגירה' }); }
+        catch (e) { if (e.name === 'AbortError') return toast('הגיבוי בוטל'); throw e; }
+      } else download(name, file);
+      ui.lastBackup = new Date().toISOString(); await kv.set('lastBackup', ui.lastBackup); render();
+      toast('הגיבוי המוצפן נשמר');
     } catch (e) { fail(e); }
   },
   async importYes() {
@@ -684,6 +704,20 @@ const A = {
     } catch (e) { ui.busy = false; fail(e); render(); }
   },
   changePass() { openSheet({ type: 'pass' }); },
+  async pkUnlock() {
+    ui.busy = true; ui.err = ''; render();
+    try { const k = await PK.unlock(); await store.unlockWithKey(k, ui.keysRow); ui.busy = false; await enterMain(); }
+    catch (e) { ui.busy = false; ui.err = e.name === 'NotAllowedError' ? 'הפתיחה בוטלה. אפשר לנסות שוב או להקליד סיסמה' : e.message; render(); }
+  },
+  pkSetup() { if (!PK.supported()) return toast('המכשיר הזה לא תומך בפתיחה בטביעת פנים'); openSheet({ type: 'pkSetup' }); },
+  pkOff() { confirmSheet('לכבות פתיחה בטביעת פנים?', 'בפתיחה הבאה תצטרך להקליד את סיסמת הכספת.', 'כיבוי', async () => { await PK.remove(); ui.pkEnrolled = false; ui.sheet = null; render(); toast('כובה'); }); },
+  autolockSheet() { openSheet({ type: 'autolock' }); },
+  async setAutolock(d) { ui.autolock = +d.k; await kv.set('autolock', ui.autolock); ui.sheet = null; render(); },
+  async restoreYes() {
+    ui.busy = true; render();
+    try { const r = await store.restoreBackup(ui.sheet.payload); ui.busy = false; ui.sheet = null; render(); toast('שוחזרו ' + (r.songsAdded + r.songsRestored) + ' שירים ו־' + r.audio + ' הקלטות'); }
+    catch (e) { ui.busy = false; fail(e); render(); }
+  },
   async mfaSetup() {
     try { const f = await api.mfaEnroll(); openSheet({ type: 'mfa', id: f.id, qr: f.totp.qr_code, secret: f.totp.secret, uri: f.totp.uri }); }
     catch (e) { fail(e); }
@@ -726,6 +760,18 @@ const F = {
     try { await store.unlockWithRecovery(fd.get('rk'), fd.get('n1'), ui.keysRow); ui.busy = false; toast('הסיסמה הוחלפה'); await enterMain(); }
     catch (e) { ui.busy = false; ui.err = e.message; render(); }
   },
+  async pkSetup(fd) {
+    try {
+      const row = await store.vaultState();
+      const k = await store.masterFromPass(fd.get('pass'), row);
+      await PK.enroll(k, (api.currentUser() || {}).id || 'me');
+      await kv.del('mk'); ui.pkEnrolled = true; ui.sheet = null; render(); toast('פתיחה בטביעת פנים הופעלה');
+    } catch (e) { toast(e.name === 'NotAllowedError' ? 'ההפעלה בוטלה' : e.message); }
+  },
+  async restoreSecret(fd) {
+    try { const r = await store.openBackup(ui.sheet.text, fd.get('secret')); openSheet({ type: 'restore', meta: r.meta, payload: r.payload }); }
+    catch (e) { toast(e.message); }
+  },
   async mfa(fd) {
     ui.busy = true; ui.err = ''; render();
     try { await api.mfaVerify(ui.mfaFactor, String(fd.get('code')).trim()); ui.busy = false; await afterLogin(); }
@@ -759,6 +805,12 @@ const CHG = {
   async next(el) { await patchSong(ui.songId, { next: el.value.trim() }, el.value.trim() ? 'צעד הבא: ' + el.value.trim() : null); },
   async notes(el) { await patchSong(ui.songId, { notes: el.value }); },
   async recName(el) { await store.updateRecording(ui.sheet.id, { name: el.value.trim() }); },
+  async restore(el) {
+    const f = el.files && el.files[0]; if (!f) return;
+    const text = await f.text();
+    try { const r = await store.openBackup(text); openSheet({ type: 'restore', meta: r.meta, payload: r.payload }); }
+    catch (e) { if (e.needSecret) openSheet({ type: 'restore', text }); else fail(e); }
+  },
   upload(el) { const f = el.files && el.files[0]; if (!f) return; pendingUpload = f; openSheet({ type: 'uploadKind', name: f.name.replace(/\.[^.]+$/, '') }); },
   async import(el) {
     const f = el.files && el.files[0]; if (!f) return;
@@ -849,10 +901,18 @@ async function afterLogin() {
   if (ui.mfaOn && api.currentAal() !== 'aal2') { ui.mfaFactor = factors[0].id; ui.screen = 'mfa'; return render(); }
   ui.keysRow = await store.vaultState();
   if (!ui.keysRow) { ui.screen = 'setup'; return render(); }
-  if (await store.tryRemembered(ui.keysRow)) return enterMain();
+  await loadPrefs();
+  if (!ui.pkEnrolled && await store.tryRemembered(ui.keysRow)) return enterMain();
   ui.screen = 'unlock'; render();
 }
+async function loadPrefs() {
+  ui.pkEnrolled = await PK.enrolled();
+  const al = await kv.get('autolock'); ui.autolock = al == null ? 5 : al;
+  ui.lastBackup = (await kv.get('lastBackup')) || null;
+}
 async function enterMain() {
+  await loadPrefs();
+  if (ui.pkEnrolled) await kv.del('mk');
   ui.screen = 'main'; ui.err = ''; ui.nav = 'home'; ui.view = 'dash';
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   await store.loadLocal();
@@ -860,7 +920,15 @@ async function enterMain() {
   store.sync().then(render).catch(e => { if (e.status === 401) { ui.screen = 'auth'; render(); } });
 }
 store.onChange(() => { if (ui.screen === 'main' && !ui.sheet && document.activeElement && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) render(); });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && store.isUnlocked()) store.sync().then(render).catch(() => {}); });
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'hidden') { ui.hiddenAt = Date.now(); return; }
+  if (!store.isUnlocked()) return;
+  if (ui.pkEnrolled && !AU.isRecording() && ui.hiddenAt && Date.now() - ui.hiddenAt >= ui.autolock * 60000) {
+    AU.player.pause(); AU.now.recId = null; ui.sheet = null;
+    await store.lock(); ui.screen = 'unlock'; render(); return;
+  }
+  store.sync().then(render).catch(() => {});
+});
 
 async function boot() {
   render();
