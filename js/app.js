@@ -21,7 +21,7 @@ const ui = {
   nav: 'home', view: 'dash', drawer: 'ready', songId: null, tab: 'text', sort: 'man', sortDir: 1, arrange: false, moved: null,
   editText: false, chordMode: false, showChords: true, q: '', filters: {}, sysView: 'main',
   sheet: null, pkEnrolled: false, autolock: 5, lastBackup: null, hiddenAt: 0, versions: null, openLyrics: '', recTarget: null, recTimer: null, swipeOpen: null,
-  palFor: null, warnFor: null, tasksView: 'date', notify: null, tkOpen: null, taskType: 'כתיבה', lastDone: null,
+  palFor: null, warnFor: null, tasksView: 'date', notify: null, tkOpen: null, qtDraft: '', qtSong: null, taskType: 'כתיבה', lastDone: null,
   stage: false, stageRun: false, stageSpeed: 3, stageSize: 26
 };
 const isWide = () => window.innerWidth >= 1000;
@@ -38,6 +38,17 @@ function withTransition(dir, fn) {
 
 // ---------- עזרים ----------
 const DAY = 86400000;
+function songPickBody(sh) {
+  const q = (sh.q || '').trim();
+  const row = s => `<button class="row" data-a="spPick" data-id="${s.id}"><span class="glz" style="width:10px;height:10px;background:${gv(stageOf(s.data.stage))}"></span><span class="grow"><span class="t">${esc(s.data.title)}</span></span><span class="m">${q ? esc(stageOf(s.data.stage).name) : 'מוכנות ' + rd(s.data.readiness)}</span></button>`;
+  if (q) { const f = all().filter(s => s.data.title.includes(q)).slice(0, 30); return `<div class="box">${f.length ? f.map(row).join('') : '<div class="empty">אין שיר בשם הזה</div>'}</div>`; }
+  if (sh.dr) { const f = sortSongs(byStage(sh.dr), sh.dr); return `<div class="box">${f.length ? f.map(row).join('') : '<div class="empty">המגירה הזו ריקה</div>'}</div>`; }
+  const recent = deskCards().slice(0, 4);
+  return `${recent.length ? `<span class="flabel">פתוחים לאחרונה</span><div class="chips">${recent.map(s => `<button class="chip" data-a="spPick" data-id="${s.id}"><span class="led" style="background:${gv(stageOf(s.data.stage))}"></span>${esc(s.data.title)}</button>`).join('')}</div>` : ''}
+    <span class="flabel">או לפי מגירה</span>
+    <div class="spdr">${store.drawers().map(st => `<button data-a="spDrawer" data-k="${esc(st.k)}" style="--g:${gv(st)}"><b>${esc(st.name)}</b><span>${byStage(st.k).length} שירים</span></button>`).join('')}</div>
+    <button class="spgen" data-a="spPick" data-id="${GEN}">משימה כללית, בלי שיר</button>`;
+}
 function teKeep() { const sh = ui.sheet; if (!sh || sh.type !== 'taskEdit') return; const t = $('#tet'); if (t) sh.draft.text = t.value; }
 const openTxt = n => n === 1 ? 'משימה פתוחה אחת' : n + ' פתוחות';
 function rel(iso) {
@@ -270,7 +281,7 @@ function tileHtml(st, i) {
     <span class="nm">${esc(st.name)}</span><span class="cnt"><b>${ss.length}</b><span>שירים</span></span></button>`;
 }
 function todayCard() {
-  const its = []; all().forEach(s => store.openTasks(s).forEach(t => { const g = TK.dueGroup(t); if (g === 'late' || g === 'today') its.push({ s, t, g }); }));
+  const its = []; allHosts().forEach(s => store.openTasks(s).forEach(t => { const g = TK.dueGroup(t); if (g === 'late' || g === 'today') its.push({ s, t, g }); }));
   if (!its.length) return '';
   const late = its.filter(x => x.g === 'late').length, today = its.length - late;
   const sorted = TK.sortTasks(its.map(x => x.t)).map(t => its.find(x => x.t === t)).slice(0, 4);
@@ -433,30 +444,30 @@ function tSound(s) {
 function levelText(v) { return v == null ? 'עוד לא דורג' : v >= 10 ? '10 · סקיצה מוקלטת להשמעה' : v >= 9 ? rd(v) + ' · הפקה מוכנה להקלטה' : v >= 8 ? rd(v) + ' · טקסט, אקורדים ולחן' : v >= 7 ? rd(v) + ' · בסיס' : v >= 6 ? rd(v) + ' · מבנה' : rd(v) + ' · רעיון'; }
 const TK_ACT = { 'הקלטה': ['להקליט עכשיו', I.mic], 'כתיבה': ['לפתוח את הטקסט', I.pen || ''], 'הפקה': ['לפתוח את הסאונד', I.tape] };
 function taskRow(s, t, opt = {}) {
-  const g = TK.dueGroup(t); const st = stageOf(s.data.stage);
-  const act = TK_ACT[t.type] && (g === 'late' || g === 'today') && t.id !== 'n0';
+  const g = TK.dueGroup(t); const st = s.general ? null : stageOf(s.data.stage);
+  const act = !s.general && TK_ACT[t.type] && (g === 'late' || g === 'today') && t.id !== 'n0';
   return `<div class="tk g-${g}" data-tk="${s.id}|${esc(t.id)}">
     <div class="tk-under"><span class="tk-ok">${I.check}בוצע</span><span class="tk-post"><button data-a="taskPost" data-id="${s.id}" data-t="${esc(t.id)}" data-k="1">מחר</button><button data-a="taskPost" data-id="${s.id}" data-t="${esc(t.id)}" data-k="7">שבוע הבא</button></span></div>
     <div class="tk-face">
       <button class="cb" data-a="taskDone" data-id="${s.id}" data-t="${esc(t.id)}" aria-label="סימון כבוצע">${I.check}</button>
       <div class="tk-main" data-a="taskEdit" data-id="${s.id}" data-t="${esc(t.id)}" role="button" tabindex="0">
         <span class="tk-t">${esc(t.text)}</span>
-        <span class="tk-m">${opt.song ? `<span class="tk-song"><i style="background:${gv(st)}"></i>${esc(s.data.title)}</span>` : ''}${opt.type === false ? '' : `<span class="tag">${esc(t.type || 'אחר')}</span>`}${t.due ? `<span class="tk-due">${I.clock.replace(/16/g, '12')}${esc(TK.dueLabel(t))}</span>` : ''}${t.due && TK.remindAt(t) ? `<span class="tk-bell" title="תזכורת">${I.bell || ''}</span>` : ''}</span>
+        <span class="tk-m">${opt.song ? `<span class="tk-song"><i style="background:${st ? gv(st) : 'var(--faint)'}"></i>${esc(s.general ? 'כללי' : s.data.title)}</span>` : ''}${opt.type === false ? '' : `<span class="tag">${esc(t.type || 'אחר')}</span>`}${t.due ? `<span class="tk-due">${I.clock.replace(/16/g, '12')}${esc(TK.dueLabel(t))}</span>` : ''}${t.due && TK.remsOf(t).length ? `<span class="tk-bell" title="תזכורת">${I.bell || ''}${TK.remsOf(t).length > 1 ? TK.remsOf(t).length : ''}</span>` : ''}</span>
         ${act ? `<button class="tk-go" data-a="taskGo" data-id="${s.id}" data-k="${esc(t.type)}">${TK_ACT[t.type][1]}${TK_ACT[t.type][0]}</button>` : ''}
       </div>
     </div></div>`;
 }
-function qChips(p) {
+function qChips(p, noSong) {
   const out = [];
-  if (p.songId && song(p.songId)) out.push(`<span class="qc">♪ ${esc(song(p.songId).data.title)}</span>`);
+  if (!noSong && p.songId && song(p.songId)) out.push(`<span class="qc">♪ ${esc(song(p.songId).data.title)}</span>`);
   if (p.type) out.push(`<span class="qc">${esc(p.type)}</span>`);
   if (p.due) out.push(`<span class="qc acc">${I.clock.replace(/16/g, '12')}${esc(TK.dueLabel(p))}</span>`);
   if (p.due) out.push(`<span class="qc acc">${I.bell || ''}תזכורת</span>`);
-  return out.join('') || '<span class="qhint">מזהה לבד תאריך, שעה, סוג עבודה ושם שיר</span>';
+  return out.join('') || (noSong ? '' : '<span class="qhint">מזהה לבד תאריך, שעה, סוג עבודה ושם שיר</span>');
 }
 function notifyCard() {
   if (ui.notify === 'on' || ui.notify === 'denied' || ui.notify === 'unsupported' || !ui.notify) return '';
-  if (!all().some(s => store.openTasks(s).some(t => t.due))) return '';
+  if (!allHosts().some(s => store.openTasks(s).some(t => t.due))) return '';
   if (ui.notify === 'needs-install') return '';
   return `<div class="banner"><span>${I.bell || ''} להפעיל התראות כדי לקבל תזכורת בזמן?</span><button class="btn sm pri" data-a="notifyOn">הפעלה</button></div>`;
 }
@@ -511,7 +522,7 @@ function vStage() {
 
 // ---- משימות ----
 function vTasks(wide) {
-  const items = []; all().forEach(s => store.openTasks(s).forEach(t => items.push({ s, t, g: TK.dueGroup(t) })));
+  const items = []; allHosts().forEach(s => store.openTasks(s).forEach(t => items.push({ s, t, g: TK.dueGroup(t) })));
   const late = items.filter(x => x.g === 'late').length, today = items.filter(x => x.g === 'today').length;
   let groups = '';
   if (ui.tasksView === 'date') {
@@ -521,8 +532,10 @@ function vTasks(wide) {
       return `<section class="tgrp g-${k}"><div class="ghead"><span class="led"></span><span class="gn">${name}</span><small>${its.length}</small></div><div class="tks">${sorted.map(({ s, t }) => taskRow(s, t, { song: true })).join('')}</div></section>`;
     }).join('');
   } else if (ui.tasksView === 'song') {
-    const ss = all().filter(s => store.openTasks(s).length).sort((a, b) => (b.data.readiness ?? -1) - (a.data.readiness ?? -1));
-    groups = ss.map(s => { const st = stageOf(s.data.stage); const ts = TK.sortTasks(store.openTasks(s));
+    const ss = allHosts().filter(s => store.openTasks(s).length).sort((a, b) => (a.general - b.general) || (b.data.readiness ?? -1) - (a.data.readiness ?? -1));
+    groups = ss.map(s => { const ts = TK.sortTasks(store.openTasks(s));
+      if (s.general) return `<section><div class="ghead"><span class="led" style="background:var(--faint)"></span><span style="flex:1;font-family:var(--serif);font-size:18px;font-weight:600">כללי</span><small>בלי שיר</small></div><div class="tks">${ts.map(t => taskRow(s, t, {})).join('')}</div></section>`;
+      const st = stageOf(s.data.stage);
       return `<section><div class="ghead"><span class="led" style="background:${gv(st)}"></span><button data-a="openState" data-id="${s.id}">${esc(s.data.title)}</button><small>${esc(st.name)} · מוכנות ${rd(s.data.readiness)}</small></div><div class="tks">${ts.map(t => taskRow(s, t, {})).join('')}</div></section>`; }).join('');
   } else {
     groups = TASK_TYPES.map(ty => {
@@ -531,13 +544,12 @@ function vTasks(wide) {
       return `<section><div class="ghead"><span style="flex:1;font-size:15px;font-weight:600">${ty}</span><small>${openTxt(its.length)}</small></div><div class="tks">${sorted.map(({ s, t }) => taskRow(s, t, { song: true, type: false })).join('')}</div></section>`;
     }).join('');
   }
-  const songsOpt = all().slice().sort((a, b) => (b.data.editedAt || '').localeCompare(a.data.editedAt || ''));
+  const qs = ui.qtSong === GEN ? 'משימה כללית' : ui.qtSong && song(ui.qtSong) ? song(ui.qtSong).data.title : '';
   return `<div><h1 class="h1">משימות</h1><div class="sub" style="margin-top:8px">${late ? `<b class="late-t">${late} באיחור</b> · ` : ''}${today} להיום · ${items.length} פתוחות</div></div>
   ${notifyCard()}
   <form class="qadd" data-form="quickTask">
-    <div class="addtask"><label class="sr" for="qt">משימה חדשה</label><input class="inp" id="qt" name="text" placeholder="להקליט גיטרה לשריטה ישנה מחר ב־18" autocomplete="off" maxlength="200" data-input="qt"><button class="iconbtn acc" type="submit" aria-label="הוספה">${I.plus}</button></div>
-    <div class="qrow"><label class="sr" for="qs">שיר</label><select class="inp qsel" id="qs" name="song">${songsOpt.length ? '' : '<option value="">אין שירים עדיין</option>'}${songsOpt.map(s => `<option value="${s.id}">${esc(s.data.title)}</option>`).join('')}</select></div>
-    <div class="qchips" id="qtc">${qChips({})}</div>
+    <div class="addtask"><label class="sr" for="qt">משימה חדשה</label><input class="inp" id="qt" name="text" value="${esc(ui.qtDraft || '')}" placeholder="להקליט גיטרה לשריטה ישנה מחר ב־18" autocomplete="off" maxlength="200" data-input="qt"><button class="iconbtn acc" type="submit" aria-label="הוספה">${I.plus}</button></div>
+    <div class="qchips" id="qtc"><button type="button" class="qpick ${qs ? 'on' : ''}" data-a="songPick">♪ ${qs ? esc(qs) : 'בחירת שיר'}</button>${qChips(TK.parseTask(ui.qtDraft || '', songList()), true)}</div>
   </form>
   <div class="seg" style="grid-template-columns:repeat(3,minmax(0,1fr))"><button class="${ui.tasksView === 'date' ? 'on' : ''}" data-a="tasksView" data-k="date">לפי תאריך</button><button class="${ui.tasksView === 'song' ? 'on' : ''}" data-a="tasksView" data-k="song">לפי שיר</button><button class="${ui.tasksView === 'type' ? 'on' : ''}" data-a="tasksView" data-k="type">לפי סוג</button></div>
   ${groups || '<div class="box"><div class="empty">אין משימות פתוחות. כותבים למעלה, או מוסיפים בלשונית "מצב" של שיר.</div></div>'}
@@ -709,18 +721,25 @@ function vSheet() {
     <p class="hint" style="margin:0;font-size:12px;line-height:1.6">כדאי להשאיר את המסך פתוח עד הסוף. אם הרשת נופלת לרגע, כל חתיכה מנסה שוב לבד.</p>`;
   } else if (sh.type === 'uploadDone') {
     h = `<div class="updone"><span class="ok pop">${I.check || '✓'}</span><b>נשמר במגירה</b><span class="hint">${esc(sh.txt)}</span></div>`;
+  } else if (sh.type === 'songPick') {
+    h = `<div style="display:flex;align-items:center;gap:10px">${sh.dr && !sh.q ? `<button class="iconbtn" data-a="spBack" aria-label="חזרה">${I.back}</button>` : ''}<h3 style="flex:1">${sh.dr && !sh.q ? esc(stageOf(sh.dr).name) : 'לאיזה שיר?'}</h3></div>
+    <label class="sr" for="spq">חיפוש שיר</label><input class="inp" id="spq" value="${esc(sh.q || '')}" placeholder="חיפוש שיר בשם" autocomplete="off" data-input="spq">
+    <div id="spl" class="spl">${songPickBody(sh)}</div>`;
   } else if (sh.type === 'taskEdit') {
-    const dr = sh.draft; const s = song(sh.sid);
+    const dr = sh.draft; const s = host(sh.sid);
     const qd = TK.quickDates(); const custom = dr.due && !qd.some(([k]) => k === dr.due);
-    h = `<h3>עריכת משימה</h3><span class="hint" style="margin-top:-8px">${esc(s ? s.data.title : '')}</span>
+    h = `<h3>עריכת משימה</h3><span class="hint" style="margin-top:-8px">${esc(s ? (s.general ? 'משימה כללית' : s.data.title) : '')}</span>
     <div class="field"><label for="tet">משימה</label><input class="inp" id="tet" value="${esc(dr.text)}" maxlength="200" autocomplete="off"></div>
     <div class="field"><span class="flabel">סוג</span><div class="chips">${TASK_TYPES.map(t => `<button class="chip ${dr.type === t ? 'on' : ''}" data-a="teType" data-k="${t}">${t}</button>`).join('')}</div></div>
     <div class="field"><span class="flabel">מתי</span><div class="chips">${qd.map(([k, l]) => `<button class="chip ${dr.due === k ? 'on' : ''}" data-a="teDue" data-k="${k}">${l}</button>`).join('')}</div>
       <div class="grid2"><label class="dtin ${custom ? 'on' : ''}"><span>תאריך</span><input type="date" id="ted" value="${esc(dr.due)}" data-change="teDate"></label>
       <label class="dtin ${dr.time ? 'on' : ''}"><span>שעה</span><input type="time" id="tetm" value="${esc(dr.time)}" data-change="teTime" ${dr.due ? '' : 'disabled'}></label></div>
       ${dr.time ? '<button class="linkbtn" data-a="teClearTime">בלי שעה</button>' : ''}</div>
-    ${dr.due ? `<div class="field"><span class="flabel">תזכורת</span><div class="chips">${TK.REMS.filter(([k]) => dr.time || k === -1 || k === 0 || k === 1440).map(([k, l]) => `<button class="chip ${dr.rem === k || (!dr.time && k === 0 && dr.rem !== -1 && dr.rem !== 1440) ? 'on' : ''}" data-a="teRem" data-k="${k}">${!dr.time && k === 0 ? 'בבוקר, ב־9:00' : !dr.time && k === 1440 ? 'יום לפני, ב־9:00' : l}</button>`).join('')}</div>
-      ${ui.notify !== 'on' ? `<span class="hint">${ui.notify === 'needs-install' ? 'תזכורות מגיעות רק כשהמגירה פתוחה מהאייקון במסך הבית.' : ui.notify === 'denied' ? 'ההתראות חסומות בהגדרות הטלפון.' : 'כדי לקבל תזכורת בטלפון, צריך להפעיל התראות פעם אחת.'}</span>${ui.notify === 'off' ? '<button class="btn sm" data-a="notifyOn" style="align-self:flex-start">הפעלת התראות</button>' : ''}` : ''}</div>` : ''}
+    ${dr.due ? (() => { const opts = dr.time ? TK.REMS : TK.REMS_DAY; const on = k => dr.time ? dr.rems.includes(k) : (k === 0 ? dr.rems.some(x => x < 1440) : dr.rems.includes(k)); const sel = opts.filter(([k]) => on(k));
+      return `<div class="field"><div style="display:flex;justify-content:space-between;align-items:baseline"><span class="flabel">תזכורות · אפשר לבחור כמה</span><span class="hint" style="color:var(--acc-text)">${sel.length ? sel.length + ' נבחרו' : 'בלי תזכורת'}</span></div>
+      <div class="chips">${opts.map(([k, l]) => `<button class="chip remc ${on(k) ? 'on' : ''}" data-a="teRem" data-k="${k}"><span class="tick">✓</span>${l}</button>`).join('')}</div>
+      <span class="hint">${sel.length ? 'תקפוץ התראה: ' + sel.map(([, l]) => l).join(', ') + '.' : 'לא תקפוץ התראה למשימה הזו.'}</span>
+      ${ui.notify !== 'on' ? `<span class="hint">${ui.notify === 'needs-install' ? 'תזכורות מגיעות רק כשהמגירה פתוחה מהאייקון במסך הבית.' : ui.notify === 'denied' ? 'ההתראות חסומות בהגדרות הטלפון.' : 'כדי לקבל תזכורת בטלפון, צריך להפעיל התראות פעם אחת.'}</span>${ui.notify === 'off' ? '<button class="btn sm" data-a="notifyOn" style="align-self:flex-start">הפעלת התראות</button>' : ''}` : ''}</div>`; })() : ''}
     <div class="grid2"><button class="btn danger" data-a="taskDel" data-id="${sh.sid}" data-t="${esc(sh.tid)}">מחיקה</button><button class="btn pri" data-a="teSave">שמירה</button></div>`;
   } else if (sh.type === 'recMenu') {
     const r = S.recs.get(sh.id);
@@ -784,7 +803,12 @@ async function patchSong(id, patch, logEntry) {
   const s = song(id);
   await store.saveSong(id, Object.assign({}, s.data, patch), { logEntry });
 }
+const GEN = '__general';
+function generalHost() { return { id: GEN, general: true, data: { title: 'כללי', stage: null, tasks: (store.meta().tasks || []) } }; }
+const host = id => id === GEN ? generalHost() : song(id);
+const allHosts = () => { const g = generalHost(); return all().concat(g.data.tasks.some(t => !t.done) ? [g] : []); };
 async function saveTasks(s, tasks, logEntry) {
+  if (s.id === GEN) { tasks = tasks.filter(t => !t.done); await store.saveMeta({ tasks }); remSoon(); return; }
   tasks = tasks.filter(t => !t.done).map(t => t.id === 'n0' ? Object.assign({}, t, { id: store.uid() }) : t);
   const first = TK.sortTasks(tasks)[0];
   await patchSong(s.id, { tasks, next: first ? first.text : '' }, logEntry);
@@ -795,13 +819,13 @@ function remSoon() { clearTimeout(remT); remT = setTimeout(() => store.syncRemin
 let badgeN = -1;
 function updateBadge() {
   if (ui.screen !== 'main') return;
-  let n = 0; all().forEach(s => store.openTasks(s).forEach(t => { const g = TK.dueGroup(t); if (g === 'late' || g === 'today') n++; }));
+  let n = 0; allHosts().forEach(s => store.openTasks(s).forEach(t => { const g = TK.dueGroup(t); if (g === 'late' || g === 'today') n++; }));
   if (n !== badgeN) { badgeN = n; NT.badge(n); }
 }
 // סימון "בוצע": סימן קופץ, קו על הטקסט, המשימה נסגרת ונעלמת, ורק אז נשמרת
 async function completeTask(sid, tid, how) {
   const el = root.querySelector('.tk[data-tk="' + sid + '|' + CSS.escape(tid) + '"]');
-  const s = song(sid); if (!s) return;
+  const s = host(sid); if (!s) return;
   const prev = store.tasksOf(s).map(t => Object.assign({}, t)); const t = prev.find(x => x.id === tid); if (!t) return;
   if (el && !reduceMotion()) {
     el.classList.add('doing');
@@ -812,7 +836,7 @@ async function completeTask(sid, tid, how) {
   }
   await saveTasks(s, prev.filter(x => x.id !== tid), 'בוצע: ' + t.text);
   ui.tkOpen = null; render();
-  toast('בוצע · נרשם בהיסטוריה של השיר', async () => { const s2 = song(sid); const cur = store.tasksOf(s2).filter(x => !x.done); const back = Object.assign({}, t, { done: false }); await saveTasks(s2, cur.concat([back]), 'הוחזר: ' + t.text); render(); });
+  toast(sid === GEN ? 'בוצע' : 'בוצע · נרשם בהיסטוריה של השיר', async () => { const s2 = host(sid); const cur = store.tasksOf(s2).filter(x => !x.done); const back = Object.assign({}, t, { done: false }); await saveTasks(s2, cur.concat([back]), 'הוחזר: ' + t.text); render(); });
 }
 
 async function leaveSong() {
@@ -1062,14 +1086,22 @@ const A = {
   // משימות
   taskType(d) { ui.taskType = d.k; render(); setTimeout(() => { const i = $('#nt'); i && i.focus(); }, 20); },
   taskDone(d) { return completeTask(d.id, d.t, 'tap'); },
+  songPick() { const i = $('#qt'); if (i) ui.qtDraft = i.value; openSheet({ type: 'songPick', q: '', dr: null }); },
+  spDrawer(d) { ui.sheet.dr = d.k; render(); },
+  spBack() { ui.sheet.dr = null; render(); },
+  async spPick(d) {
+    const then = ui.sheet && ui.sheet.then; ui.qtSong = d.id; closeSheet();
+    if (then === 'add') { setTimeout(() => { const f = root.querySelector('[data-form=quickTask]'); if (f) f.requestSubmit(); }, 260); }
+    else setTimeout(() => { const i = $('#qt'); i && i.focus(); }, 260);
+  },
   async taskDel(d) {
-    const s = song(d.id); const prev = store.tasksOf(s); const t = prev.find(x => x.id === d.t);
+    const s = host(d.id); const prev = store.tasksOf(s); const t = prev.find(x => x.id === d.t);
     ui.sheet = null;
     await saveTasks(s, prev.filter(x => x.id !== d.t), t ? 'נמחקה משימה: ' + t.text : null); render();
-    toast('המשימה נמחקה', async () => { await saveTasks(song(d.id), prev); render(); });
+    toast('המשימה נמחקה', async () => { await saveTasks(host(d.id), prev); render(); });
   },
   async taskPost(d) {
-    const s = song(d.id); const n = +d.k; const base = new Date(); base.setHours(0, 0, 0, 0); base.setDate(base.getDate() + n);
+    const s = host(d.id); const n = +d.k; const base = new Date(); base.setHours(0, 0, 0, 0); base.setDate(base.getDate() + n);
     const tasks = store.tasksOf(s).map(t => t.id === d.t ? Object.assign({}, t, { due: TK.ymd(base) }) : t);
     ui.tkOpen = null;
     await saveTasks(s, tasks); render();
@@ -1077,17 +1109,17 @@ const A = {
   },
   taskEdit(d) {
     if (ui.tkOpen) { closeTk(); return; }
-    const s = song(d.id); const t = store.tasksOf(s).find(x => x.id === d.t); if (!t) return;
-    openSheet({ type: 'taskEdit', sid: d.id, tid: d.t, draft: { text: t.text, type: t.type || 'אחר', due: t.due || '', time: t.time || '', rem: t.rem ?? 15 } });
+    const s = host(d.id); const t = store.tasksOf(s).find(x => x.id === d.t); if (!t) return;
+    openSheet({ type: 'taskEdit', sid: d.id, tid: d.t, draft: { text: t.text, type: t.type || 'אחר', due: t.due || '', time: t.time || '', rems: TK.remsOf(t).slice() } });
   },
   teType(d) { ui.sheet.draft.type = d.k; teKeep(); render(); },
   teDue(d) { ui.sheet.draft.due = d.k; if (!d.k) ui.sheet.draft.time = ''; teKeep(); render(); },
-  teRem(d) { ui.sheet.draft.rem = +d.k; teKeep(); render(); },
+  teRem(d) { const k = +d.k, r = ui.sheet.draft.rems; const i = r.indexOf(k); if (i >= 0) r.splice(i, 1); else r.push(k); r.sort((a, b) => a - b); teKeep(); render(); },
   teClearTime() { ui.sheet.draft.time = ''; teKeep(); render(); },
   async teSave() {
-    teKeep(); const sh = ui.sheet, dr = sh.draft; const s = song(sh.sid);
+    teKeep(); const sh = ui.sheet, dr = sh.draft; const s = host(sh.sid);
     if (!dr.text.trim()) return toast('חסר טקסט למשימה');
-    const tasks = store.tasksOf(s).map(t => t.id === sh.tid ? Object.assign({}, t, { text: dr.text.trim(), type: dr.type, due: dr.due || null, time: dr.due && dr.time ? dr.time : null, rem: dr.rem }) : t);
+    const tasks = store.tasksOf(s).map(t => t.id === sh.tid ? Object.assign({}, t, { text: dr.text.trim(), type: dr.type, due: dr.due || null, time: dr.due && dr.time ? dr.time : null, rems: dr.time ? dr.rems : dr.rems.map(x => x < 1440 ? 0 : x).filter((x, i, a) => a.indexOf(x) === i), rem: undefined }) : t);
     closeSheet(); await saveTasks(s, tasks); render();
   },
   async taskGo(d) {
@@ -1289,13 +1321,15 @@ const F = {
   async quickTask(fd) {
     const raw = String(fd.get('text') || '').trim(); if (!raw) return;
     const p = TK.parseTask(raw, songList());
-    const sid = p.songId || fd.get('song'); const s = song(sid);
-    if (!s) return toast('בוחרים שיר למשימה');
+    const sid = p.songId || ui.qtSong;
+    if (!sid) { ui.qtDraft = raw; openSheet({ type: 'songPick', q: '', dr: null, then: 'add' }); return; }
+    const s = host(sid); if (!s) return toast('בוחרים שיר למשימה');
     const tasks = store.tasksOf(s).map(t => Object.assign({}, t));
     const t = { id: store.uid(), text: p.text || raw, type: p.type || 'אחר', done: false, at: new Date().toISOString(), due: p.due, time: p.time };
     tasks.push(t);
+    ui.qtDraft = ''; ui.qtSong = null;
     await saveTasks(s, tasks, 'משימה חדשה: ' + t.text); render();
-    toast('נוספה ל"' + s.data.title + '"' + (t.due ? ' · ' + TK.dueLabel(t) : ''));
+    toast((s.general ? 'נוספה משימה כללית' : 'נוספה ל"' + s.data.title + '"') + (t.due ? ' · ' + TK.dueLabel(t) : ''));
     setTimeout(() => { const i = $('#qt'); i && i.focus(); }, 20);
   },
   async pass(fd) {
@@ -1338,7 +1372,13 @@ const CHG = {
 };
 const songList = () => all().map(s => ({ id: s.id, title: s.data.title }));
 const INP = {
-  qt(el) { const p = TK.parseTask(el.value, songList()); const c = $('#qtc'); if (c) c.innerHTML = qChips(p); if (p.songId) { const sel = $('#qs'); if (sel) sel.value = p.songId; } },
+  qt(el) {
+    ui.qtDraft = el.value; const p = TK.parseTask(el.value, songList()); if (p.songId) ui.qtSong = p.songId;
+    const c = $('#qtc'); if (!c) return;
+    const qs = ui.qtSong === GEN ? 'משימה כללית' : ui.qtSong && song(ui.qtSong) ? song(ui.qtSong).data.title : '';
+    c.innerHTML = `<button type="button" class="qpick ${qs ? 'on' : ''}" data-a="songPick">♪ ${qs ? esc(qs) : 'בחירת שיר'}</button>` + qChips(p, true);
+  },
+  spq(el) { if (ui.sheet && ui.sheet.type === 'songPick') { ui.sheet.q = el.value; const l = $('#spl'); if (l) l.innerHTML = songPickBody(ui.sheet); } },
   nt(el) { const p = TK.parseTask(el.value, []); const c = $('#ntc'); if (c) c.innerHTML = el.value.trim() ? qChips(p) : '<span class="qhint">אפשר לכתוב גם מתי: "מחר", "ביום שלישי", "ב־18"</span>'; },
   rv(el) { const v = parseFloat(el.value); const o = document.getElementById('rvv'); if (o) o.textContent = rd(v); const t = document.getElementById('rvt'); if (t) t.textContent = levelText(v); },
   q(el) { ui.q = el.value; const r = document.getElementById('results'); if (r) r.innerHTML = resultsHtml(); }

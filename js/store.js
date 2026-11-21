@@ -480,10 +480,15 @@ export async function syncReminders() {
   remBusy = true;
   try {
     const want = new Map(); const now = Date.now();
-    for (const s of songs()) for (const t of openTasks(s)) {
+    const hosts = songs().map(s => ({ id: s.id, title: s.data.title, tasks: openTasks(s) }));
+    hosts.push({ id: '', title: 'משימה כללית', tasks: (meta().tasks || []).filter(t => !t.done) });
+    for (const h of hosts) for (const t of h.tasks) {
       if (t.id === 'n0') continue;
-      const at = TK.remindAt(t); if (!at || at.getTime() < now - 60000) continue;
-      want.set(t.id, { at: at.toISOString(), sig: at.toISOString() + '|' + t.text + '|' + s.data.title + '|' + (t.time || ''), s, t });
+      for (const { rem, at } of TK.remindAts(t)) {
+        if (at.getTime() < now - 60000) continue;
+        const id = t.id + '@' + rem;
+        want.set(id, { at: at.toISOString(), sig: at.toISOString() + '|' + t.text + '|' + h.title + '|' + (t.time || ''), h, t });
+      }
     }
     const server = await api.listReminders();
     const sent = (await kv.get('remsig')) || {};
@@ -491,7 +496,7 @@ export async function syncReminders() {
     for (const r of server) if (!want.has(r.id)) { await api.deleteReminder(r.id); delete sent[r.id]; }
     for (const [id, w] of want) {
       if (have.has(id) && sent[id] === w.sig) continue;
-      const payload = await C.encJSON(nkey, { t: w.t.text, s: w.s.data.title, id: w.s.id, l: TK.dueLabel(w.t) });
+      const payload = await C.encJSON(nkey, { t: w.t.text, s: w.h.title, id: w.h.id, l: TK.dueLabel(w.t) });
       await api.upsertReminder({ id, fire_at: w.at, payload, sent_at: null });
       sent[id] = w.sig;
     }

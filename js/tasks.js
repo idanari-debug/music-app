@@ -34,15 +34,27 @@ export function sortTasks(list) {
   });
 }
 
-// מתי לשלוח תזכורת. rem: דקות לפני (ברירת מחדל רבע שעה), 1440 = יום לפני, ‎-1 = בלי
-export const REMS = [[0, 'בזמן'], [15, 'רבע שעה לפני'], [60, 'שעה לפני'], [1440, 'יום לפני'], [-1, 'בלי תזכורת']];
-export function remindAt(t) {
-  if (!t.due || t.rem === -1) return null;
-  const rem = t.rem ?? 15;
-  if (t.time) return new Date(dueDate(t).getTime() - rem * 60000);
-  const base = fromYmd(t.due); base.setHours(9, 0);
-  return rem >= 1440 ? addDays(base, -1) : base;
+// תזכורות: אפשר כמה למשימה. rems = מערך של דקות לפני (0 = בזמן). ריק = בלי תזכורת.
+// משימה בלי שעה: התזכורת ב־9:00 ביום עצמו, או ימים לפני באותה שעה.
+export const REMS = [[0, 'בזמן'], [15, 'רבע שעה לפני'], [60, 'שעה לפני'], [180, '3 שעות לפני'], [1440, 'יום לפני'], [10080, 'שבוע לפני']];
+export const REMS_DAY = [[0, 'בבוקר, ב־9:00'], [1440, 'יום לפני'], [10080, 'שבוע לפני']];
+export function remsOf(t) {
+  if (Array.isArray(t.rems)) return t.rems;
+  if (t.rem === -1) return [];
+  return [t.rem ?? 15];
 }
+export function remindAts(t) {
+  if (!t.due) return [];
+  const out = [];
+  for (const rem of remsOf(t)) {
+    let at;
+    if (t.time) at = new Date(dueDate(t).getTime() - rem * 60000);
+    else { at = fromYmd(t.due); at.setHours(9, 0); if (rem >= 1440) at = addDays(at, -Math.round(rem / 1440)); }
+    out.push({ rem, at });
+  }
+  return out;
+}
+export const remindAt = t => { const a = remindAts(t); return a.length ? a[0].at : null; };
 
 export function dueLabel(t, now = new Date()) {
   if (!t.due) return '';
