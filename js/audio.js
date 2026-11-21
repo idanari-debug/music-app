@@ -114,6 +114,7 @@ export function adtsWrap(frames, asc) {
   return out;
 }
 
+const within = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(what)), ms))]);
 async function decode(buf) {
   const AC = window.AudioContext || window.webkitAudioContext;
   const ctx = new AC();
@@ -127,7 +128,7 @@ function peaksOf(audio) {
 }
 
 export async function compress(file, onProgress) {
-  const audio = await decode(await file.arrayBuffer());
+  const audio = await within(decode(await file.arrayBuffer()), 120000, 'decode-timeout');
   const sampleRate = audio.sampleRate, nch = Math.min(2, audio.numberOfChannels), total = audio.length;
   const frames = []; let asc = null, err = null;
   const enc = new AudioEncoder({
@@ -148,10 +149,11 @@ export async function compress(file, onProgress) {
     for (let c = 0; c < nch; c++) data.set(planes[c].subarray(s, s + n), c * n);
     const ad = new AudioData({ format: 'f32-planar', sampleRate, numberOfFrames: n, numberOfChannels: nch, timestamp: Math.round(s / sampleRate * 1e6), data });
     enc.encode(ad); ad.close();
-    while (enc.encodeQueueSize > 24) await new Promise(r => setTimeout(r, 4));
-    if (onProgress && (s / STEP) % 20 === 0) { onProgress(s / total); await new Promise(r => setTimeout(r, 0)); }
+    { const t0 = Date.now(); while (enc.encodeQueueSize > 24) { if (Date.now() - t0 > 20000) throw new Error('encoder-stuck'); await new Promise(r => setTimeout(r, 4)); } }
+    if (onProgress && (s / STEP) % 20 === 0) { onProgress(0.9 * s / total); await new Promise(r => setTimeout(r, 0)); }
   }
-  await enc.flush(); enc.close();
+  await within(enc.flush(), 60000, 'flush-timeout'); try { enc.close(); } catch (e) {}
+  onProgress && onProgress(0.95);
   if (err) throw err;
   if (!frames.length) throw new Error('empty');
   // אם הדפדפן כבר עטף את המסגרות, לא עוטפים שוב
@@ -164,7 +166,7 @@ export async function compress(file, onProgress) {
   if (already) { let t = 0; frames.forEach(f => t += f.length); out = new Uint8Array(t); let o = 0; frames.forEach(f => { out.set(f, o); o += f.length; }); }
   else out = adtsWrap(frames, asc);
   // בדיקה: הקובץ החדש חייב להתפענח ולהיות באורך של המקור
-  const check = await decode(out.buffer.slice(0));
+  const check = await within(decode(out.buffer.slice(0)), 60000, 'verify-timeout');
   if (!check || Math.abs(check.duration - audio.duration) > Math.max(0.5, audio.duration * 0.02)) throw new Error('verify');
   onProgress && onProgress(1);
   return { blob: new Blob([out], { type: 'audio/aac' }), duration: audio.duration, peaks: peaksOf(audio) };

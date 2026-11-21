@@ -131,10 +131,29 @@ export async function deleteRecording(id) {
 
 // אחסון קבצים (תמיד מוצפנים לפני העלאה)
 const enc = p => p.split('/').map(encodeURIComponent).join('/');
-export async function uploadFile(path, bytes) {
-  return parse(await req('/storage/v1/object/' + CONFIG.bucket + '/' + enc(path), {
-    method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'x-upsert': 'true' }, body: bytes
-  }));
+// העלאה עם התקדמות אמיתית: הפס זז לפי הבתים שכבר יצאו מהטלפון.
+// אם ההעלאה נעצרת דקה שלמה בלי התקדמות, היא מבוטלת ומנוסה שוב.
+export async function uploadFile(path, bytes, onProgress) {
+  const send = t => new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    let last = Date.now();
+    const watch = setInterval(() => { if (Date.now() - last > 60000) { x.abort(); } }, 5000);
+    x.open('POST', CONFIG.url + '/storage/v1/object/' + CONFIG.bucket + '/' + enc(path));
+    x.setRequestHeader('apikey', CONFIG.key);
+    x.setRequestHeader('Authorization', 'Bearer ' + t);
+    x.setRequestHeader('Content-Type', 'application/octet-stream');
+    x.setRequestHeader('x-upsert', 'true');
+    x.upload.onprogress = e => { last = Date.now(); if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total); };
+    x.onload = () => { clearInterval(watch); resolve({ status: x.status, text: x.responseText }); };
+    x.onerror = () => { clearInterval(watch); reject(new ApiError(0, { msg: 'הרשת נפלה באמצע ההעלאה' })); };
+    x.onabort = () => { clearInterval(watch); reject(new ApiError(0, { msg: 'ההעלאה נתקעה ובוטלה' })); };
+    x.send(bytes);
+  });
+  let r = await send(await token());
+  if (r.status === 401) { await refresh(); r = await send(session.access_token); }
+  if (r.status >= 200 && r.status < 300) return r.text ? JSON.parse(r.text) : null;
+  let body = {}; try { body = JSON.parse(r.text); } catch (e) {}
+  throw new ApiError(r.status, body);
 }
 export async function downloadFile(path) {
   const res = await req('/storage/v1/object/authenticated/' + CONFIG.bucket + '/' + enc(path));

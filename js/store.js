@@ -337,7 +337,7 @@ export async function addRecording(songId, bytes, meta, onProgress) {
     for (let i = 0; i < n; i++) {
       const p = i ? path + '.' + i : path;
       const encd = await C.encBytes(key, bytes.subarray(i * PART, Math.min(bytes.length, (i + 1) * PART)));
-      await retry(() => api.uploadFile(p, encd));
+      await retry(() => api.uploadFile(p, encd, f => onProgress && onProgress((i + f) / n, i, n)));
       done.push(p); size += encd.length;
       onProgress && onProgress((i + 1) / n, i + 1, n);
     }

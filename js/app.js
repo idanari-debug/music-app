@@ -863,19 +863,29 @@ function updateBadge() {
 }
 // סימון "בוצע": סימן קופץ, קו על הטקסט, המשימה נסגרת ונעלמת, ורק אז נשמרת
 async function completeTask(sid, tid, how) {
-  const el = root.querySelector('.tk[data-tk="' + sid + '|' + CSS.escape(tid) + '"]');
+  const el = root.querySelector('.tk[data-tk="' + sid + '|' + tid.replace(/"/g, '\\"') + '"]');
   const s = host(sid); if (!s) return;
   const prev = store.tasksOf(s).map(t => Object.assign({}, t)); const t = prev.find(x => x.id === tid); if (!t) return;
-  if (el && !reduceMotion()) {
-    el.classList.add('doing');
-    if (how === 'swipe') { const f = el.querySelector('.tk-face'); f.style.transition = 'transform .28s cubic-bezier(.4,0,.2,1)'; f.style.transform = 'translateX(110%)'; }
-    await new Promise(r => setTimeout(r, how === 'swipe' ? 220 : 420));
-    el.style.maxHeight = el.offsetHeight + 'px'; void el.offsetHeight; el.classList.add('gone');
-    await new Promise(r => setTimeout(r, 300));
+  if (el) {
+    // התנועה נעשית ישירות על האלמנט, כך שהיא רצה עד הסוף גם כשהטלפון מוגדר להפחתת תנועה
+    el.classList.add('doing'); el.style.pointerEvents = 'none';
+    const f = el.querySelector('.tk-face');
+    const fast = reduceMotion();
+    try {
+      if (how === 'swipe') {
+        const from = getComputedStyle(f).transform; f.style.transition = 'none';
+        await f.animate([{ transform: from === 'none' ? 'translateX(0)' : from }, { transform: 'translateX(105%)', opacity: 0.4 }], { duration: fast ? 120 : 260, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' }).finished;
+      } else {
+        await new Promise(r => setTimeout(r, fast ? 150 : 420));
+      }
+      const h = el.offsetHeight;
+      el.style.overflow = 'hidden';
+      await el.animate([{ height: h + 'px', opacity: 1, marginBottom: '0px' }, { height: '0px', opacity: 0, marginBottom: '-8px' }], { duration: fast ? 120 : 280, easing: 'cubic-bezier(.22,1,.36,1)', fill: 'forwards' }).finished;
+    } catch (e) {}
   }
   await saveTasks(s, prev.filter(x => x.id !== tid), 'בוצע: ' + t.text);
   ui.tkOpen = null; render();
-  toast(sid === GEN ? 'בוצע' : 'בוצע · נרשם בהיסטוריה של השיר', async () => { const s2 = host(sid); const cur = store.tasksOf(s2).filter(x => !x.done); const back = Object.assign({}, t, { done: false }); await saveTasks(s2, cur.concat([back]), 'הוחזר: ' + t.text); render(); });
+  toast(sid === GEN ? 'בוצע' : 'בוצע ונרשם בהיסטוריה', async () => { const s2 = host(sid); const cur = store.tasksOf(s2).filter(x => !x.done); const back = Object.assign({}, t, { done: false }); await saveTasks(s2, cur.concat([back]), 'הוחזר: ' + t.text); render(); });
 }
 
 async function leaveSong() {
@@ -992,6 +1002,11 @@ async function runUpload(f, sh) {
   const small = sh.pick === 'small';
   ui.sheet = { type: 'uploadWork', small, name: sh.name, size: sh.size, dur: sh.dur, parts: Math.ceil(sh.size / (45 * 1048576)) };
   render();
+  // המסך לא נכבה באמצע: כשהטלפון ננעל, הדפדפן עוצר את ההעלאה
+  let wl = null; try { if (navigator.wakeLock) wl = await navigator.wakeLock.request('screen'); } catch (e) {}
+  try { return await runUpload2(f, sh, small); } finally { try { wl && wl.release(); } catch (e) {} }
+}
+async function runUpload2(f, sh, small) {
   let blob = f, mime = f.type, pre = null;
   if (small) {
     try {
