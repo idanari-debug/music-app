@@ -258,7 +258,7 @@ function deskCards() {
 function tileHtml(st, i) {
   const ss = byStage(st.k); const rs = ss.map(s => s.data.readiness).filter(v => v != null);
   const avg = rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : 0;
-  return `<button class="tile" data-a="drawer" data-k="${esc(st.k)}" style="--g:${gv(st)}">
+  return `<button class="tile" data-a="drawer" data-k="${esc(st.k)}"${st.k === 'bottom' ? '' : ` data-dg="tile"`} style="--g:${gv(st)}">
     <span class="dip" aria-hidden="true"></span><svg class="wv" viewBox="0 0 200 12" preserveAspectRatio="none" aria-hidden="true"><path d="${WAVES[i % 3]}"/></svg>
     <span class="rb" aria-hidden="true"><i style="width:${avg * 10}%"></i></span>
     <span class="nm">${esc(st.name)}</span><span class="cnt"><b>${ss.length}</b><span>שירים</span></span></button>`;
@@ -282,7 +282,7 @@ function vDash() {
       <span class="tt">${s.data.pinned ? I.pin + ' ' : ''}${esc(s.data.title)}</span>
       <span class="tape" aria-hidden="true"><i></i><b></b><i></i></span></button>`; }).join('')}</div></section>` : ''}
   <section><div class="sechead"><h2 class="h3">המגירות</h2><button class="chip" data-a="drawersEdit">${I.sliders}סידור ועריכה</button></div>
-    <div class="drawers">${store.drawers().map(tileHtml).join('')}<button class="tile add" data-a="drawersEdit" data-add="1">${I.plus}מגירה חדשה</button></div>
+    <div class="drawers" data-dgc="tile">${store.drawers().map(tileHtml).join('')}<button class="tile add" data-a="drawersEdit" data-add="1">${I.plus}מגירה חדשה</button></div>
     <p class="hint" style="margin:10px 4px 0">הפס הלבן בזיגוג: מוכנות ממוצעת של השירים במגירה</p></section>`;
 }
 
@@ -304,23 +304,24 @@ function songRow(s, opt = {}) {
   const f = flags(s); const st = stageOf(s.data.stage);
   const ic = (on, i, l) => `<span class="${on ? '' : 'off'}" title="${l}">${i.replace('<svg', '<svg class="' + (on ? '' : 'off') + '"')}</span>`;
   const aria = [f.sketch ? 'יש סקיצה' : 'אין סקיצה', f.beat ? 'יש טייפ ביט' : 'אין טייפ ביט', f.guitar ? 'יש גיטרה' : 'אין גיטרה'].join(', ');
-  const inner = `<span class="score" style="--g:${gv(st)}"><span>${rd(s.data.readiness)}</span></span>
+  const dg = opt.drag ? ` data-dg="song" data-id="${s.id}"` : '';
+  const inner = `${opt.drag ? `<span class="grip" aria-hidden="true">${I.grip}</span>` : ''}<span class="score" style="--g:${gv(st)}"><span>${rd(s.data.readiness)}</span></span>
     <span class="grow"><span class="t">${s.data.pinned ? I.pin : ''}${esc(s.data.title)}</span><span class="m">${opt.meta || ('פוטנציאל ' + esc(s.data.potential || '–') + ' · ' + rel(s.data.editedAt))}</span></span>`;
   if (opt.arrange) return `<div class="srow ${ui.moved === s.id ? 'moved' : ''}"><span class="grip" aria-hidden="true">${I.grip}</span>${inner}
     <span class="arrows"><button data-a="moveSong" data-id="${s.id}" data-k="-1" aria-label="הזזה למעלה" ${opt.first ? 'disabled' : ''}>${I.up}</button><button data-a="moveSong" data-id="${s.id}" data-k="1" aria-label="הזזה למטה" ${opt.last ? 'disabled' : ''}>${I.down}</button></span></div>`;
-  const row = `<button class="srow" data-a="open" data-id="${s.id}" ${opt.sel ? 'style="box-shadow:0 0 0 2px var(--acc)"' : ''}>${inner}<span class="ico3" role="img" aria-label="${aria}">${ic(f.sketch, I.mic, 'סקיצה')}${ic(f.beat, I.tape, 'טייפ ביט')}${ic(f.guitar, I.guitar, 'גיטרה')}</span></button>`;
+  const row = `<button class="srow" data-a="open" data-id="${s.id}"${opt.swipe ? '' : dg} ${opt.sel ? 'style="box-shadow:0 0 0 2px var(--acc)"' : ''}>${inner}<span class="ico3" role="img" aria-label="${aria}">${ic(f.sketch, I.mic, 'סקיצה')}${ic(f.beat, I.tape, 'טייפ ביט')}${ic(f.guitar, I.guitar, 'גיטרה')}</span></button>`;
   if (!opt.swipe) return row;
-  return `<div class="swrap ${ui.swipeOpen === s.id ? 'open' : ''}" data-sw="${s.id}"><div class="sw-act">
+  return `<div class="swrap ${ui.swipeOpen === s.id ? 'open' : ''}" data-sw="${s.id}"${dg}><div class="sw-act">
     <button data-a="moveSheet" data-id="${s.id}">העברה</button><button data-a="pin" data-id="${s.id}">${s.data.pinned ? 'ביטול הצמדה' : 'הצמדה'}</button><button class="del" data-a="trash" data-id="${s.id}">לסל</button></div>${row}</div>`;
 }
 function drawerList(st, wide) {
   const list = sortSongs(byStage(st.k), st.k);
   const sorts = [['man', 'ידני'], ['v', 'מוכנות'], ['ago', 'עריכה אחרונה'], ['pot', 'פוטנציאל'], ['abc', 'א–ת']];
-  const arr = ui.sort === 'man' && ui.arrange;
+  const man = ui.sort === 'man' && list.length > 1;
   return `<div class="hscroll" style="padding-bottom:4px">${sorts.map(([k, l]) => `<button class="chip ${ui.sort === k ? 'on' : ''}" data-a="sort" data-k="${k}">${l}${ui.sort === k && k !== 'man' ? `<span class="dir">${ui.sortDir === 1 ? '↓' : '↑'}</span>` : ''}</button>`).join('')}</div>
-  ${ui.sort === 'man' && list.length > 1 ? `<div class="arrbar ${arr ? 'on' : ''}"><span>${arr ? 'מזיזים בחצים. הסדר נשמר מיד.' : 'הסדר כאן הוא הסדר שקבעת בעצמך.'}</span><button class="btn sm ${arr ? 'pri' : 'dark'}" data-a="arrange">${arr ? 'סיום' : 'סידור'}</button></div>` : ''}
-  <div class="songs">${list.length ? list.map((s, i) => songRow(s, { swipe: !arr && !wide, arrange: arr, first: i === 0, last: i === list.length - 1, sel: wide && s.id === ui.songId })).join('') : '<div class="box"><div class="empty">המגירה הזו ריקה</div></div>'}</div>
-  ${list.length && !arr ? `<div class="legend"><span>${I.mic.replace('17', '13').replace('17', '13')}סקיצה</span><span>${I.tape.replace('17', '13').replace('17', '13')}טייפ ביט</span><span>${I.guitar.replace('17', '13').replace('17', '13')}גיטרה</span><span>מודגש = קיים</span></div>${wide ? '' : '<p class="hint" style="margin:0 4px">החלקה הצידה על שיר: העברה, הצמדה או סל.</p>'}` : ''}`;
+  ${list.length > 1 ? `<p class="hint draghint" style="margin:0 4px">${man ? 'לחיצה ארוכה על שיר, או גרירה מהידית, כדי להזיז. הסדר נשמר מיד.' : 'לסידור ידני בגרירה, בוחרים במיון "ידני".'}</p>` : ''}
+  <div class="songs" data-dgc="song">${list.length ? list.map(s => songRow(s, { swipe: !wide, drag: man, sel: wide && s.id === ui.songId })).join('') : '<div class="box"><div class="empty">המגירה הזו ריקה</div></div>'}</div>
+  ${list.length ? `<div class="legend"><span>${I.mic.replace('17', '13').replace('17', '13')}סקיצה</span><span>${I.tape.replace('17', '13').replace('17', '13')}טייפ ביט</span><span>${I.guitar.replace('17', '13').replace('17', '13')}גיטרה</span><span>מודגש = קיים</span></div>${wide ? '' : '<p class="hint" style="margin:0 4px">החלקה הצידה על שיר: העברה, הצמדה או סל.</p>'}` : ''}`;
 }
 function vDrawer() {
   const st = stageOf(ui.drawer);
@@ -332,16 +333,14 @@ function vDrawer() {
 function vDrawersEdit(wide) {
   const ds = store.drawers(); const last = ds.length - 1;
   return `<div class="hdr" style="align-items:center">${wide ? '' : `<button class="iconbtn" data-a="home" aria-label="חזרה">${I.back}</button>`}<h1 class="h2">סידור המגירות</h1>${wide ? '' : '<button class="btn sm pri" data-a="home">סיום</button>'}</div>
-  <p class="hint" style="margin:0 4px">שם, צבע וסדר של כל מגירה. השירים עוברים יחד עם המגירה, ושינוי שם לא נוגע בהם.</p>
-  <div class="box">${ds.map((d, i) => {
+  <p class="hint" style="margin:0 4px">שם, צבע וסדר של כל מגירה. גוררים מהידית כדי לשנות סדר. השירים עוברים יחד עם המגירה, ושינוי שם לא נוגע בהם.</p>
+  <div class="box" data-dgc="drawer">${ds.map((d, i) => {
     const n = byStage(d.k).length + store.trashedSongs().filter(s => s.data.stage === d.k).length; const fixed = d.k === 'bottom';
-    return `<div class="drow"><div class="in">
-      <span class="grip" aria-hidden="true">${fixed ? '' : I.grip}</span>
+    return `<div class="drow"${fixed ? '' : ` data-dg="drawer" data-k="${esc(d.k)}"`}><div class="in">
+      <span class="grip" aria-hidden="true">${fixed ? I.lock || '' : I.grip}</span>
       <button class="sw" data-a="palFor" data-k="${esc(d.k)}" aria-label="צבע הזיגוג של ${esc(d.name)}"><span class="glz" style="width:16px;height:16px;background:${gv(d)}"></span></button>
       <label class="sr" for="dn-${i}">שם המגירה</label><input id="dn-${i}" value="${esc(d.name)}" data-change="drawerName" data-k="${esc(d.k)}" maxlength="30" autocomplete="off">
       <span class="cnt">${n}</span>
-      <button class="mini" data-a="moveDrawer" data-k="${esc(d.k)}" data-d="-1" aria-label="הזזה למעלה" ${fixed || i === 0 ? 'disabled' : ''}>${I.up}</button>
-      <button class="mini" data-a="moveDrawer" data-k="${esc(d.k)}" data-d="1" aria-label="הזזה למטה" ${fixed || i >= last - 1 ? 'disabled' : ''}>${I.down}</button>
       <button class="mini del" data-a="delDrawer" data-k="${esc(d.k)}" aria-label="מחיקת המגירה" ${fixed ? 'disabled' : ''}>${I.trash}</button></div>
       ${ui.palFor === d.k ? `<div class="pal">${GLAZES.map(g => `<button class="${d.glaze === g.k ? 'on' : ''}" style="background:${glazeVar(g.k)}" data-a="setGlaze" data-k="${esc(d.k)}" data-g="${g.k}" aria-label="${g.name}"></button>`).join('')}</div>` : ''}
       ${ui.warnFor === d.k ? `<div class="warn">יש במגירה הזו ${n === 1 ? 'שיר אחד' : n + ' שירים'} (כולל בסל). קודם מעבירים אותם למגירה אחרת, ורק אז אפשר למחוק אותה.</div>` : ''}</div>`;
@@ -1291,6 +1290,103 @@ function swipeEnd() {
 }
 root.addEventListener('touchend', swipeEnd);
 root.addEventListener('touchcancel', swipeEnd);
+
+// גרירה לסידור: שירים, מגירות בבית ובמסך הסידור.
+// באצבע: לחיצה ארוכה, או נגיעה בידית. בעכבר: לוחצים וגוררים. הסדר נשמר בשחרור.
+let dg = null, dgSuppressClick = false;
+const LONG = 320;
+function dgScroller(el) { return el.closest('.main') || el.closest('.col.mid') || el.closest('.col') || document.scrollingElement; }
+root.addEventListener('pointerdown', ev => {
+  if (dg || ev.button > 0 || ui.sheet) return;
+  const it = ev.target.closest('[data-dg]');
+  if (!it || ev.target.closest('input,textarea,.sw,.mini,.sw-act button')) return;
+  const box = it.parentElement; if (!box || !box.dataset.dgc) return;
+  const onGrip = !!ev.target.closest('.grip');
+  const touch = ev.pointerType !== 'mouse';
+  dg = { it, box, kind: box.dataset.dgc, x0: ev.clientX, y0: ev.clientY, x: ev.clientX, y: ev.clientY, lifted: false, pid: ev.pointerId, touch };
+  if (onGrip) { ev.preventDefault(); dgLift(); }
+  else if (touch) { it.classList.add('dgpress'); dg.timer = setTimeout(() => { if (dg && !dg.lifted) dgLift(); }, LONG); }
+}, true);
+function dgLift() {
+  const d = dg; d.lifted = true; clearTimeout(d.timer);
+  sw = null; if (ui.swipeOpen) closeSwipe();
+  d.sc = dgScroller(d.box); d.st0 = d.sc.scrollTop;
+  d.items = [...d.box.children].filter(x => x.dataset && x.dataset.dg);
+  d.from = d.items.indexOf(d.it); d.to = d.from;
+  d.rects = d.items.map(x => { const r = x.getBoundingClientRect(); return { x: r.left, y: r.top + d.st0, w: r.width, h: r.height }; });
+  d.it.classList.remove('dgpress'); d.box.classList.add('dgbox'); d.it.classList.add('dglift');
+  d.items.forEach(x => { if (x !== d.it) x.classList.add('dgmove'); });
+  document.documentElement.classList.add('dragging');
+  try { navigator.vibrate && navigator.vibrate(8); } catch (e) {}
+  dgFrame();
+}
+function dgPlace() {
+  const d = dg; const st = d.sc.scrollTop;
+  const dx = d.kind === 'tile' ? d.x - d.x0 : 0, dy = d.y - d.y0 + (st - d.st0);
+  d.it.style.transform = `translate(${dx}px,${dy}px) scale(${d.kind === 'tile' ? 1.05 : 1.03}) rotate(${d.kind === 'tile' ? -1.2 : -.5}deg)`;
+  const r0 = d.rects[d.from]; const cx = r0.x + r0.w / 2 + dx, cy = r0.y + r0.h / 2 + dy;
+  let best = d.to, bd = Infinity;
+  d.rects.forEach((r, i) => { const ex = r.x + r.w / 2 - cx, ey = r.y + r.h / 2 - cy; const dd = (d.kind === 'tile' ? ex * ex : 0) + ey * ey; if (dd < bd) { bd = dd; best = i; } });
+  if (best !== d.to) {
+    d.to = best;
+    const order = d.items.map((_, i) => i); order.splice(d.from, 1); order.splice(d.to, 0, d.from);
+    order.forEach((orig, slot) => {
+      if (orig === d.from) return;
+      const a = d.rects[orig], b = d.rects[slot];
+      d.items[orig].style.transform = (a.x !== b.x || a.y !== b.y) ? `translate(${b.x - a.x}px,${b.y - a.y}px)` : '';
+    });
+  }
+}
+function dgFrame() {
+  if (!dg || !dg.lifted) return;
+  const d = dg; const sr = d.sc === document.scrollingElement ? { top: 0, bottom: innerHeight } : d.sc.getBoundingClientRect();
+  const edge = 70; let v = 0;
+  if (d.y < sr.top + edge) v = -Math.ceil((sr.top + edge - d.y) / 6);
+  else if (d.y > sr.bottom - edge) v = Math.ceil((d.y - (sr.bottom - edge)) / 6);
+  if (v) d.sc.scrollTop += v;
+  dgPlace();
+  d.raf = requestAnimationFrame(dgFrame);
+}
+window.addEventListener('pointermove', ev => {
+  if (!dg || ev.pointerId !== dg.pid) return;
+  dg.x = ev.clientX; dg.y = ev.clientY;
+  if (!dg.lifted) {
+    const m = Math.hypot(ev.clientX - dg.x0, ev.clientY - dg.y0);
+    if (!dg.touch && m > 6) dgLift();
+    else if (dg.touch && m > 9) dgCancel();
+  }
+}, { passive: true });
+document.addEventListener('touchmove', ev => { if (dg && dg.lifted) ev.preventDefault(); }, { passive: false });
+function dgCancel() { if (!dg) return; clearTimeout(dg.timer); dg.it.classList.remove('dgpress'); dg = null; }
+async function dgDrop() {
+  const d = dg; if (!d) return;
+  if (!d.lifted) return dgCancel();
+  cancelAnimationFrame(d.raf); dg = null; dgSuppressClick = true; setTimeout(() => { dgSuppressClick = false; }, 400);
+  const a = d.rects[d.from], b = d.rects[d.to], st = d.sc.scrollTop - d.st0;
+  d.it.classList.add('dgdrop');
+  d.it.style.transform = `translate(${b.x - a.x}px,${b.y - a.y - 0}px)`;
+  void st;
+  document.documentElement.classList.remove('dragging');
+  await new Promise(r => setTimeout(r, 240));
+  const ids = d.items.map(x => x.dataset.id || x.dataset.k); const mv = ids.splice(d.from, 1)[0]; ids.splice(d.to, 0, mv);
+  try {
+    if (d.from !== d.to) {
+      if (d.kind === 'song') {
+        const rest = sortSongs(byStage(ui.drawer), ui.drawer).map(x => x.id).filter(id => !ids.includes(id));
+        await store.saveOrder(ui.drawer, ids.concat(rest));
+      } else {
+        const ds = store.drawers(); const byK = new Map(ds.map(x => [x.k, x]));
+        const moved = ids.map(k => byK.get(k)).filter(Boolean);
+        await store.saveDrawers(moved.concat(ds.filter(x => !ids.includes(x.k))));
+      }
+    }
+  } catch (e) { fail(e); }
+  render();
+}
+window.addEventListener('pointerup', ev => { if (dg && ev.pointerId === dg.pid) dgDrop(); });
+window.addEventListener('pointercancel', ev => { if (dg && ev.pointerId === dg.pid) { if (dg.lifted) dgDrop(); else dgCancel(); } });
+root.addEventListener('click', ev => { if (dgSuppressClick) { ev.stopPropagation(); ev.preventDefault(); dgSuppressClick = false; } }, true);
+root.addEventListener('contextmenu', ev => { if (ev.target.closest('[data-dg]')) ev.preventDefault(); });
 
 // נגן
 AU.player.addEventListener('timeupdate', () => {

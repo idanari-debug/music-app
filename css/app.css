@@ -407,3 +407,21 @@ html[data-vt=fade]::view-transition-new(root){animation:vt-fade-in .28s ease-out
 .pop{animation:pop .5s cubic-bezier(.34,1.56,.64,1)}
 @keyframes pop{0%{transform:scale(.6);opacity:0}70%{transform:scale(1.08)}100%{transform:none;opacity:1}}
 @media (prefers-reduced-motion:reduce){.pop{animation:none}.upstep .meter span{transition:none}}
+
+/* גרירה לסידור */
+[data-dg]{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+[data-dg] .grip{touch-action:none;cursor:grab}
+.songs [data-dg]>.srow .grip,.songs>.srow[data-dg] .grip{width:18px;margin-inline-end:-4px;color:var(--faint)}
+.dgpress{transform:scale(.985);transition:transform .3s var(--ease)!important}
+.dgbox{position:relative}
+.dglift{position:relative;z-index:30;transition:transform .2s cubic-bezier(.34,1.56,.64,1),box-shadow .2s!important;box-shadow:0 18px 40px var(--sh),0 6px 14px var(--sh)!important;cursor:grabbing}
+.dglift.dgdrop{transition:transform .24s var(--ease),box-shadow .24s!important}
+.swrap.dglift>.srow,.dglift.srow{box-shadow:0 18px 40px var(--sh),0 6px 14px var(--sh)!important}
+.swrap.dglift{border-radius:18px}
+.swrap.dglift .sw-act{opacity:0!important}
+.dgmove{transition:transform .28s var(--ease)!important}
+.drow.dglift{background:var(--surf);border-radius:18px}
+.dgbox.box{overflow:visible}
+html.dragging,html.dragging *{cursor:grabbing!important}
+html.dragging .main,html.dragging .col{scroll-behavior:auto}
+@media (prefers-reduced-motion:reduce){.dgmove,.dglift,.dglift.dgdrop{transition:none!important}}
