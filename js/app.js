@@ -7,6 +7,8 @@ import { readImportFile } from './importer.js';
 import { CONFIG } from './config.js';
 import * as PK from './passkey.js';
 import { kv } from './db.js';
+import * as TK from './tasks.js';
+import * as NT from './notify.js';
 
 const root = document.getElementById('root');
 const $ = s => root.querySelector(s);
@@ -19,7 +21,7 @@ const ui = {
   nav: 'home', view: 'dash', drawer: 'ready', songId: null, tab: 'text', sort: 'man', sortDir: 1, arrange: false, moved: null,
   editText: false, chordMode: false, showChords: true, q: '', filters: {}, sysView: 'main',
   sheet: null, pkEnrolled: false, autolock: 5, lastBackup: null, hiddenAt: 0, versions: null, openLyrics: '', recTarget: null, recTimer: null, swipeOpen: null,
-  palFor: null, warnFor: null, tasksView: 'song', taskType: 'כתיבה', lastDone: null,
+  palFor: null, warnFor: null, tasksView: 'date', notify: null, tkOpen: null, taskType: 'כתיבה', lastDone: null,
   stage: false, stageRun: false, stageSpeed: 3, stageSize: 26
 };
 const isWide = () => window.innerWidth >= 1000;
@@ -36,6 +38,7 @@ function withTransition(dir, fn) {
 
 // ---------- עזרים ----------
 const DAY = 86400000;
+function teKeep() { const sh = ui.sheet; if (!sh || sh.type !== 'taskEdit') return; const t = $('#tet'); if (t) sh.draft.text = t.value; }
 const openTxt = n => n === 1 ? 'משימה פתוחה אחת' : n + ' פתוחות';
 function rel(iso) {
   if (!iso) return '';
@@ -74,6 +77,8 @@ const I = {
   tasks: svg('<path d="M4 6.5l1.8 1.8L9 5M12 7h8M4 13.5l1.8 1.8L9 12M12 14h8M12 20h8"/><rect x="4.5" y="18" width="4" height="4" rx="1"/>', 21, 1.8),
   sys: svg('<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>', 21, 1.8),
   sliders: svg('<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>', 15, 2),
+  pen: svg('<path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/>', 15, 2),
+  bell: svg('<path d="M6 10a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6M10 20a2 2 0 0 0 4 0"/>', 13, 2),
   mic: svg('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>', 17),
   tape: svg('<rect x="3" y="6" width="18" height="12" rx="3"/><circle cx="8.5" cy="12" r="2"/><circle cx="15.5" cy="12" r="2"/>', 17),
   guitar: svg('<circle cx="8" cy="16" r="5"/><circle cx="8" cy="16" r="1.4"/><path d="M11.5 12.5L19 5M17.5 3.5l3 3"/>', 17),
@@ -133,6 +138,7 @@ function render() {
   else if (ui.screen === 'recover') h = vRecover();
   else h = isWide() ? vWide() : vMain();
   root.innerHTML = h;
+  if (ui.screen === 'main') updateBadge();
   if (keep && root.dataset.k === keep.k) {
     if ($('.main')) $('.main').scrollTop = keep.y;
     if ($('.col.mid')) $('.col.mid').scrollTop = keep.y2;
@@ -263,6 +269,15 @@ function tileHtml(st, i) {
     <span class="rb" aria-hidden="true"><i style="width:${avg * 10}%"></i></span>
     <span class="nm">${esc(st.name)}</span><span class="cnt"><b>${ss.length}</b><span>שירים</span></span></button>`;
 }
+function todayCard() {
+  const its = []; all().forEach(s => store.openTasks(s).forEach(t => { const g = TK.dueGroup(t); if (g === 'late' || g === 'today') its.push({ s, t, g }); }));
+  if (!its.length) return '';
+  const late = its.filter(x => x.g === 'late').length, today = its.length - late;
+  const sorted = TK.sortTasks(its.map(x => x.t)).map(t => its.find(x => x.t === t)).slice(0, 4);
+  return `<section class="today"><div class="sechead"><h2 class="h3">היום</h2><span style="display:flex;gap:6px">${late ? `<span class="pill late">${late === 1 ? 'אחת באיחור' : late + ' באיחור'}</span>` : ''}${today ? `<span class="pill">${today} להיום</span>` : ''}</span></div>
+    <div class="tks">${sorted.map(({ s, t }) => taskRow(s, t, { song: true, type: false })).join('')}</div>
+    ${its.length > 4 ? `<button class="more" data-a="nav" data-k="tasks">עוד ${its.length - 4} ←</button>` : ''}</section>`;
+}
 function vDash() {
   const list = all();
   const desk = deskCards();
@@ -276,6 +291,7 @@ function vDash() {
       <button class="iconbtn" data-a="lockNow" aria-label="נעילה">${I.lock}</button></div></div>
   ${list.length === 0 ? `<div class="card"><b class="h3">המגירה ריקה</b><p class="hint" style="margin:0">אפשר לייבא את השירים מהפתקים, או להתחיל שיר חדש.</p><div class="grid2"><button class="btn pri" data-a="goImport">ייבוא שירים</button><button class="btn" data-a="newSong">שיר חדש</button></div></div>` : ''}
   ${list.length && (!ui.lastBackup || daysAgo(ui.lastBackup) > 30) ? `<div class="banner"><span>${ui.lastBackup ? 'עבר יותר מחודש מהגיבוי האחרון.' : 'עוד לא עשית גיבוי מוצפן.'}</span><button class="btn sm pri" data-a="backup" data-k="full">גיבוי עכשיו</button></div>` : ''}
+  ${todayCard()}
   ${desk.length ? `<section><div class="sechead"><h2 class="h3">על השולחן</h2><span class="sub">פתוחים לאחרונה</span></div>
     <div class="hscroll">${desk.map(s => { const st = stageOf(s.data.stage); return `<button class="desk" data-a="open" data-id="${s.id}" style="--g:${gv(st)}">
       <span class="top"><span><span class="led" style="background:${gv(st)}"></span>${esc(st.name)}</span><b class="num" style="font-size:13px;color:var(--ink)">${rd(s.data.readiness)}</b></span>
@@ -415,20 +431,43 @@ function tSound(s) {
 }
 
 function levelText(v) { return v == null ? 'עוד לא דורג' : v >= 10 ? '10 · סקיצה מוקלטת להשמעה' : v >= 9 ? rd(v) + ' · הפקה מוכנה להקלטה' : v >= 8 ? rd(v) + ' · טקסט, אקורדים ולחן' : v >= 7 ? rd(v) + ' · בסיס' : v >= 6 ? rd(v) + ' · מבנה' : rd(v) + ' · רעיון'; }
-function taskRows(s, tasks, showSong) {
-  const firstOpen = tasks.find(t => !t.done);
-  return tasks.map(t => `<div class="task ${t.done ? 'done' : ''}"><button class="cb ${t.done ? 'on' : ''}" data-a="taskToggle" data-id="${s.id}" data-t="${esc(t.id)}" aria-label="${t.done ? 'סימון כלא בוצע' : 'סימון כבוצע'}">${t.done ? I.check : ''}</button>
-    <span class="tx"><span>${esc(t.text)}</span>${showSong ? `<small>${esc(s.data.title)}</small>` : ''}</span>
-    ${firstOpen && t.id === firstOpen.id ? '<span class="badge">הבא</span>' : ''}${showSong ? '' : `<span class="tag">${esc(t.type || 'אחר')}</span>`}
-    ${showSong ? '' : `<button class="tdel" data-a="taskDel" data-id="${s.id}" data-t="${esc(t.id)}" aria-label="מחיקת משימה">${I.x}</button>`}</div>`).join('');
+const TK_ACT = { 'הקלטה': ['להקליט עכשיו', I.mic], 'כתיבה': ['לפתוח את הטקסט', I.pen || ''], 'הפקה': ['לפתוח את הסאונד', I.tape] };
+function taskRow(s, t, opt = {}) {
+  const g = TK.dueGroup(t); const st = stageOf(s.data.stage);
+  const act = TK_ACT[t.type] && (g === 'late' || g === 'today') && t.id !== 'n0';
+  return `<div class="tk g-${g}" data-tk="${s.id}|${esc(t.id)}">
+    <div class="tk-under"><span class="tk-ok">${I.check}בוצע</span><span class="tk-post"><button data-a="taskPost" data-id="${s.id}" data-t="${esc(t.id)}" data-k="1">מחר</button><button data-a="taskPost" data-id="${s.id}" data-t="${esc(t.id)}" data-k="7">שבוע הבא</button></span></div>
+    <div class="tk-face">
+      <button class="cb" data-a="taskDone" data-id="${s.id}" data-t="${esc(t.id)}" aria-label="סימון כבוצע">${I.check}</button>
+      <div class="tk-main" data-a="taskEdit" data-id="${s.id}" data-t="${esc(t.id)}" role="button" tabindex="0">
+        <span class="tk-t">${esc(t.text)}</span>
+        <span class="tk-m">${opt.song ? `<span class="tk-song"><i style="background:${gv(st)}"></i>${esc(s.data.title)}</span>` : ''}${opt.type === false ? '' : `<span class="tag">${esc(t.type || 'אחר')}</span>`}${t.due ? `<span class="tk-due">${I.clock.replace(/16/g, '12')}${esc(TK.dueLabel(t))}</span>` : ''}${t.due && TK.remindAt(t) ? `<span class="tk-bell" title="תזכורת">${I.bell || ''}</span>` : ''}</span>
+        ${act ? `<button class="tk-go" data-a="taskGo" data-id="${s.id}" data-k="${esc(t.type)}">${TK_ACT[t.type][1]}${TK_ACT[t.type][0]}</button>` : ''}
+      </div>
+    </div></div>`;
+}
+function qChips(p) {
+  const out = [];
+  if (p.songId && song(p.songId)) out.push(`<span class="qc">♪ ${esc(song(p.songId).data.title)}</span>`);
+  if (p.type) out.push(`<span class="qc">${esc(p.type)}</span>`);
+  if (p.due) out.push(`<span class="qc acc">${I.clock.replace(/16/g, '12')}${esc(TK.dueLabel(p))}</span>`);
+  if (p.due) out.push(`<span class="qc acc">${I.bell || ''}תזכורת</span>`);
+  return out.join('') || '<span class="qhint">מזהה לבד תאריך, שעה, סוג עבודה ושם שיר</span>';
+}
+function notifyCard() {
+  if (ui.notify === 'on' || ui.notify === 'denied' || ui.notify === 'unsupported' || !ui.notify) return '';
+  if (!all().some(s => store.openTasks(s).some(t => t.due))) return '';
+  if (ui.notify === 'needs-install') return '';
+  return `<div class="banner"><span>${I.bell || ''} להפעיל התראות כדי לקבל תזכורת בזמן?</span><button class="btn sm pri" data-a="notifyOn">הפעלה</button></div>`;
 }
 function tState(s) {
   const d = s.data;
-  const tasks = store.tasksOf(s); const ordered = tasks.filter(t => !t.done).concat(tasks.filter(t => t.done));
-  return `<section><div class="lbl"><span>משימות לשיר</span><span>${openTxt(tasks.filter(t => !t.done).length)}</span></div>
-    <div class="box">${ordered.length ? taskRows(s, ordered, false) : '<div class="empty">עוד אין משימות. מה הדבר הבא שהשיר צריך?</div>'}</div>
+  const open = TK.sortTasks(store.openTasks(s));
+  return `<section><div class="lbl"><span>משימות לשיר</span><span>${openTxt(open.length)}</span></div>
+    <div class="tks">${open.length ? open.map(t => taskRow(s, t, {})).join('') : '<div class="box"><div class="empty">אין משימות פתוחות. מה הדבר הבא שהשיר צריך?</div></div>'}</div>
     <form data-form="addTask" style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
-      <div class="addtask"><label class="sr" for="nt">משימה חדשה</label><input class="inp" id="nt" name="text" placeholder="למשל: לכתוב בית שני" autocomplete="off" maxlength="200"><button class="iconbtn" style="background:var(--ink);color:var(--bg)" type="submit" aria-label="הוספת משימה">${I.plus}</button></div>
+      <div class="addtask"><label class="sr" for="nt">משימה חדשה</label><input class="inp" id="nt" name="text" placeholder="למשל: להקליט גיטרה מחר ב־18" autocomplete="off" maxlength="200" data-input="nt"><button class="iconbtn" style="background:var(--ink);color:var(--bg)" type="submit" aria-label="הוספת משימה">${I.plus}</button></div>
+      <div class="qchips" id="ntc"><span class="qhint">אפשר לכתוב גם מתי: "מחר", "ביום שלישי", "ב־18"</span></div>
       <div class="chips">${TASK_TYPES.map(t => `<button type="button" class="chip ${ui.taskType === t ? 'on' : ''}" data-a="taskType" data-k="${t}">${t}</button>`).join('')}</div>
     </form></section>
   <div class="card">
@@ -472,28 +511,37 @@ function vStage() {
 
 // ---- משימות ----
 function vTasks(wide) {
-  const ss = all().filter(s => store.tasksOf(s).length);
-  const open = ss.reduce((a, s) => a + store.tasksOf(s).filter(t => !t.done).length, 0);
+  const items = []; all().forEach(s => store.openTasks(s).forEach(t => items.push({ s, t, g: TK.dueGroup(t) })));
+  const late = items.filter(x => x.g === 'late').length, today = items.filter(x => x.g === 'today').length;
   let groups = '';
-  if (ui.tasksView === 'song') {
-    groups = ss.filter(s => store.tasksOf(s).some(t => !t.done) || store.tasksOf(s).some(t => t.done && daysAgo(t.at) < 7))
-      .sort((a, b) => (b.data.readiness ?? -1) - (a.data.readiness ?? -1)).map(s => {
-        const ts = store.tasksOf(s).filter(t => !t.done || daysAgo(t.at) < 7); const st = stageOf(s.data.stage);
-        const ordered = ts.filter(t => !t.done).concat(ts.filter(t => t.done));
-        return `<section><div class="ghead"><span class="led" style="background:${gv(st)}"></span><button data-a="openState" data-id="${s.id}">${esc(s.data.title)}</button><small>${esc(st.name)} · מוכנות ${rd(s.data.readiness)}</small></div><div class="box">${taskRows(s, ordered, false).replace(/<button class="tdel"[^>]*>[\s\S]*?<\/button>/g, '')}</div></section>`;
-      }).join('');
+  if (ui.tasksView === 'date') {
+    groups = TK.GROUPS.map(([k, name]) => {
+      const its = items.filter(x => x.g === k); if (!its.length) return '';
+      const sorted = TK.sortTasks(its.map(x => x.t)).map(t => its.find(x => x.t === t));
+      return `<section class="tgrp g-${k}"><div class="ghead"><span class="led"></span><span class="gn">${name}</span><small>${its.length}</small></div><div class="tks">${sorted.map(({ s, t }) => taskRow(s, t, { song: true })).join('')}</div></section>`;
+    }).join('');
+  } else if (ui.tasksView === 'song') {
+    const ss = all().filter(s => store.openTasks(s).length).sort((a, b) => (b.data.readiness ?? -1) - (a.data.readiness ?? -1));
+    groups = ss.map(s => { const st = stageOf(s.data.stage); const ts = TK.sortTasks(store.openTasks(s));
+      return `<section><div class="ghead"><span class="led" style="background:${gv(st)}"></span><button data-a="openState" data-id="${s.id}">${esc(s.data.title)}</button><small>${esc(st.name)} · מוכנות ${rd(s.data.readiness)}</small></div><div class="tks">${ts.map(t => taskRow(s, t, {})).join('')}</div></section>`; }).join('');
   } else {
     groups = TASK_TYPES.map(ty => {
-      const items = []; ss.forEach(s => store.tasksOf(s).forEach(t => { if ((t.type || 'אחר') === ty && (!t.done || daysAgo(t.at) < 7)) items.push({ s, t }); }));
-      if (!items.length) return '';
-      items.sort((a, b) => a.t.done - b.t.done);
-      return `<section><div class="ghead"><span style="flex:1;font-size:15px;font-weight:600">${ty}</span><small>${openTxt(items.filter(x => !x.t.done).length)}</small></div><div class="box">${items.map(({ s, t }) => taskRows(s, [t], true)).join('')}</div></section>`;
+      const its = items.filter(x => (x.t.type || 'אחר') === ty); if (!its.length) return '';
+      const sorted = TK.sortTasks(its.map(x => x.t)).map(t => its.find(x => x.t === t));
+      return `<section><div class="ghead"><span style="flex:1;font-size:15px;font-weight:600">${ty}</span><small>${openTxt(its.length)}</small></div><div class="tks">${sorted.map(({ s, t }) => taskRow(s, t, { song: true, type: false })).join('')}</div></section>`;
     }).join('');
   }
-  return `<div><h1 class="h1">משימות</h1><div class="sub" style="margin-top:8px">${open === 1 ? 'משימה פתוחה אחת' : open + ' משימות פתוחות'} · נאספות מלשונית "מצב" של כל שיר</div></div>
-  <div class="seg" style="grid-template-columns:repeat(2,minmax(0,1fr))"><button class="${ui.tasksView === 'song' ? 'on' : ''}" data-a="tasksView" data-k="song">לפי שיר</button><button class="${ui.tasksView === 'type' ? 'on' : ''}" data-a="tasksView" data-k="type">לפי סוג עבודה</button></div>
-  ${groups || '<div class="box"><div class="empty">אין משימות פתוחות. מוסיפים משימות בלשונית "מצב" של כל שיר.</div></div>'}
-  <p class="hint" style="margin:0 4px">משימות שבוצעו נשארות כאן שבוע, ואז נשארות רק בשיר עצמו.</p>`;
+  const songsOpt = all().slice().sort((a, b) => (b.data.editedAt || '').localeCompare(a.data.editedAt || ''));
+  return `<div><h1 class="h1">משימות</h1><div class="sub" style="margin-top:8px">${late ? `<b class="late-t">${late} באיחור</b> · ` : ''}${today} להיום · ${items.length} פתוחות</div></div>
+  ${notifyCard()}
+  <form class="qadd" data-form="quickTask">
+    <div class="addtask"><label class="sr" for="qt">משימה חדשה</label><input class="inp" id="qt" name="text" placeholder="להקליט גיטרה לשריטה ישנה מחר ב־18" autocomplete="off" maxlength="200" data-input="qt"><button class="iconbtn acc" type="submit" aria-label="הוספה">${I.plus}</button></div>
+    <div class="qrow"><label class="sr" for="qs">שיר</label><select class="inp qsel" id="qs" name="song">${songsOpt.length ? '' : '<option value="">אין שירים עדיין</option>'}${songsOpt.map(s => `<option value="${s.id}">${esc(s.data.title)}</option>`).join('')}</select></div>
+    <div class="qchips" id="qtc">${qChips({})}</div>
+  </form>
+  <div class="seg" style="grid-template-columns:repeat(3,minmax(0,1fr))"><button class="${ui.tasksView === 'date' ? 'on' : ''}" data-a="tasksView" data-k="date">לפי תאריך</button><button class="${ui.tasksView === 'song' ? 'on' : ''}" data-a="tasksView" data-k="song">לפי שיר</button><button class="${ui.tasksView === 'type' ? 'on' : ''}" data-a="tasksView" data-k="type">לפי סוג</button></div>
+  ${groups || '<div class="box"><div class="empty">אין משימות פתוחות. כותבים למעלה, או מוסיפים בלשונית "מצב" של שיר.</div></div>'}
+  ${items.length ? '<p class="hint" style="margin:0 4px">החלקה ימינה: בוצע. החלקה שמאלה: לדחות. נגיעה במשימה: עריכה, תאריך ותזכורת. משימה שבוצעה נרשמת בהיסטוריה של השיר.</p>' : ''}`;
 }
 
 // ---- חיפוש ----
@@ -545,6 +593,9 @@ function vSys() {
     <div class="thumbs" aria-hidden="true"><div class="thumb d ${night ? '' : 'sel'}"><i></i><div><span style="--tc:#93A896"></span><span style="--tc:#C48A6C"></span></div></div><div class="thumb n ${night ? 'sel' : ''}"><i></i><div><span style="--tc:#7F9683"></span><span style="--tc:#B57B5E"></span></div></div></div>
     <span class="hint">${pref === 'auto' ? 'בערב, מ־19:00, המגירה מתכהה מעצמה, ובבוקר, מ־06:30, חוזרת לאור. כפתור הירח במסך הבית מחליף ידנית בכל רגע.' : pref === 'night' ? 'המגירה נשארת כהה כל הזמן, גם ביום.' : 'המגירה נשארת בהירה כל הזמן, גם בלילה.'} ההגדרה נשמרת רק במכשיר הזה.</span>
   </div></section>
+  <section><div class="lbl"><span>התראות</span></div><div class="box">
+    <div class="row" style="cursor:default"><span class="grow"><span class="t">תזכורות למשימות</span><span class="m">${ui.notify === 'on' ? 'פעילות במכשיר הזה. הטקסט נשלח מוצפן ונפתח רק כאן' : ui.notify === 'needs-install' ? 'עובד רק כשהמגירה פתוחה מהאייקון במסך הבית' : ui.notify === 'denied' ? 'חסומות בהגדרות הטלפון. אפשר לאשר שם, תחת המגירה' : ui.notify === 'unsupported' ? 'הדפדפן הזה לא תומך בהתראות' : 'כבויות במכשיר הזה'}</span></span>
+    ${ui.notify === 'on' ? '<button class="btn sm" data-a="notifyOff">כיבוי</button>' : ui.notify === 'off' ? '<button class="btn sm pri" data-a="notifyOn">הפעלה</button>' : ''}</div></div></section>
   <section><div class="lbl"><span>גיבוי וסנכרון</span></div><div class="box">
     <div class="row" style="cursor:default"><span class="grow"><span class="t">סנכרון</span><span class="m">${!S.online ? 'אין חיבור. כל שינוי נשמר במכשיר ויעלה כשהחיבור יחזור' : S.pending ? S.pending + ' שינויים בדרך לענן' : 'הכל מגובה בענן' + (S.lastSync ? ' · ' + hm(S.lastSync) : '')}</span></span><button class="btn sm" data-a="syncNow">סנכרון עכשיו</button></div>
     <button class="row" data-a="backup" data-k="text"><span class="grow"><span class="t">גיבוי מוצפן של הטקסטים</span><span class="m">${ui.lastBackup ? 'גיבוי אחרון: ' + rel(ui.lastBackup) : 'עוד לא נעשה גיבוי'}</span></span>${I.lock}</button>
@@ -658,6 +709,19 @@ function vSheet() {
     <p class="hint" style="margin:0;font-size:12px;line-height:1.6">כדאי להשאיר את המסך פתוח עד הסוף. אם הרשת נופלת לרגע, כל חתיכה מנסה שוב לבד.</p>`;
   } else if (sh.type === 'uploadDone') {
     h = `<div class="updone"><span class="ok pop">${I.check || '✓'}</span><b>נשמר במגירה</b><span class="hint">${esc(sh.txt)}</span></div>`;
+  } else if (sh.type === 'taskEdit') {
+    const dr = sh.draft; const s = song(sh.sid);
+    const qd = TK.quickDates(); const custom = dr.due && !qd.some(([k]) => k === dr.due);
+    h = `<h3>עריכת משימה</h3><span class="hint" style="margin-top:-8px">${esc(s ? s.data.title : '')}</span>
+    <div class="field"><label for="tet">משימה</label><input class="inp" id="tet" value="${esc(dr.text)}" maxlength="200" autocomplete="off"></div>
+    <div class="field"><span class="flabel">סוג</span><div class="chips">${TASK_TYPES.map(t => `<button class="chip ${dr.type === t ? 'on' : ''}" data-a="teType" data-k="${t}">${t}</button>`).join('')}</div></div>
+    <div class="field"><span class="flabel">מתי</span><div class="chips">${qd.map(([k, l]) => `<button class="chip ${dr.due === k ? 'on' : ''}" data-a="teDue" data-k="${k}">${l}</button>`).join('')}</div>
+      <div class="grid2"><label class="dtin ${custom ? 'on' : ''}"><span>תאריך</span><input type="date" id="ted" value="${esc(dr.due)}" data-change="teDate"></label>
+      <label class="dtin ${dr.time ? 'on' : ''}"><span>שעה</span><input type="time" id="tetm" value="${esc(dr.time)}" data-change="teTime" ${dr.due ? '' : 'disabled'}></label></div>
+      ${dr.time ? '<button class="linkbtn" data-a="teClearTime">בלי שעה</button>' : ''}</div>
+    ${dr.due ? `<div class="field"><span class="flabel">תזכורת</span><div class="chips">${TK.REMS.filter(([k]) => dr.time || k === -1 || k === 0 || k === 1440).map(([k, l]) => `<button class="chip ${dr.rem === k || (!dr.time && k === 0 && dr.rem !== -1 && dr.rem !== 1440) ? 'on' : ''}" data-a="teRem" data-k="${k}">${!dr.time && k === 0 ? 'בבוקר, ב־9:00' : !dr.time && k === 1440 ? 'יום לפני, ב־9:00' : l}</button>`).join('')}</div>
+      ${ui.notify !== 'on' ? `<span class="hint">${ui.notify === 'needs-install' ? 'תזכורות מגיעות רק כשהמגירה פתוחה מהאייקון במסך הבית.' : ui.notify === 'denied' ? 'ההתראות חסומות בהגדרות הטלפון.' : 'כדי לקבל תזכורת בטלפון, צריך להפעיל התראות פעם אחת.'}</span>${ui.notify === 'off' ? '<button class="btn sm" data-a="notifyOn" style="align-self:flex-start">הפעלת התראות</button>' : ''}` : ''}</div>` : ''}
+    <div class="grid2"><button class="btn danger" data-a="taskDel" data-id="${sh.sid}" data-t="${esc(sh.tid)}">מחיקה</button><button class="btn pri" data-a="teSave">שמירה</button></div>`;
   } else if (sh.type === 'recMenu') {
     const r = S.recs.get(sh.id);
     h = `<h3>${esc(r.meta.name || kindName(r.meta.kind))}</h3>
@@ -721,8 +785,34 @@ async function patchSong(id, patch, logEntry) {
   await store.saveSong(id, Object.assign({}, s.data, patch), { logEntry });
 }
 async function saveTasks(s, tasks, logEntry) {
-  const first = tasks.find(t => !t.done);
+  tasks = tasks.filter(t => !t.done).map(t => t.id === 'n0' ? Object.assign({}, t, { id: store.uid() }) : t);
+  const first = TK.sortTasks(tasks)[0];
   await patchSong(s.id, { tasks, next: first ? first.text : '' }, logEntry);
+  remSoon();
+}
+let remT = null;
+function remSoon() { clearTimeout(remT); remT = setTimeout(() => store.syncReminders(), 1500); }
+let badgeN = -1;
+function updateBadge() {
+  if (ui.screen !== 'main') return;
+  let n = 0; all().forEach(s => store.openTasks(s).forEach(t => { const g = TK.dueGroup(t); if (g === 'late' || g === 'today') n++; }));
+  if (n !== badgeN) { badgeN = n; NT.badge(n); }
+}
+// סימון "בוצע": סימן קופץ, קו על הטקסט, המשימה נסגרת ונעלמת, ורק אז נשמרת
+async function completeTask(sid, tid, how) {
+  const el = root.querySelector('.tk[data-tk="' + sid + '|' + CSS.escape(tid) + '"]');
+  const s = song(sid); if (!s) return;
+  const prev = store.tasksOf(s).map(t => Object.assign({}, t)); const t = prev.find(x => x.id === tid); if (!t) return;
+  if (el && !reduceMotion()) {
+    el.classList.add('doing');
+    if (how === 'swipe') { const f = el.querySelector('.tk-face'); f.style.transition = 'transform .28s cubic-bezier(.4,0,.2,1)'; f.style.transform = 'translateX(110%)'; }
+    await new Promise(r => setTimeout(r, how === 'swipe' ? 220 : 420));
+    el.style.maxHeight = el.offsetHeight + 'px'; void el.offsetHeight; el.classList.add('gone');
+    await new Promise(r => setTimeout(r, 300));
+  }
+  await saveTasks(s, prev.filter(x => x.id !== tid), 'בוצע: ' + t.text);
+  ui.tkOpen = null; render();
+  toast('בוצע · נרשם בהיסטוריה של השיר', async () => { const s2 = song(sid); const cur = store.tasksOf(s2).filter(x => !x.done); const back = Object.assign({}, t, { done: false }); await saveTasks(s2, cur.concat([back]), 'הוחזר: ' + t.text); render(); });
 }
 
 async function leaveSong() {
@@ -971,18 +1061,47 @@ const A = {
   },
   // משימות
   taskType(d) { ui.taskType = d.k; render(); setTimeout(() => { const i = $('#nt'); i && i.focus(); }, 20); },
-  async taskToggle(d) {
-    const s = song(d.id); const tasks = store.tasksOf(s).map(t => Object.assign({}, t));
-    const t = tasks.find(x => x.id === d.t); if (!t) return;
-    t.done = !t.done; t.at = new Date().toISOString();
-    await saveTasks(s, tasks, (t.done ? 'בוצע: ' : 'נפתח מחדש: ') + t.text); render();
-    if (t.done) toast('בוצע: ' + t.text, async () => { const s2 = song(d.id); const ts = store.tasksOf(s2).map(x => x.id === d.t ? Object.assign({}, x, { done: false }) : x); await saveTasks(s2, ts, 'בוטל סימון ביצוע'); render(); });
-  },
+  taskDone(d) { return completeTask(d.id, d.t, 'tap'); },
   async taskDel(d) {
     const s = song(d.id); const prev = store.tasksOf(s); const t = prev.find(x => x.id === d.t);
-    await saveTasks(s, prev.filter(x => x.id !== d.t)); render();
+    ui.sheet = null;
+    await saveTasks(s, prev.filter(x => x.id !== d.t), t ? 'נמחקה משימה: ' + t.text : null); render();
     toast('המשימה נמחקה', async () => { await saveTasks(song(d.id), prev); render(); });
   },
+  async taskPost(d) {
+    const s = song(d.id); const n = +d.k; const base = new Date(); base.setHours(0, 0, 0, 0); base.setDate(base.getDate() + n);
+    const tasks = store.tasksOf(s).map(t => t.id === d.t ? Object.assign({}, t, { due: TK.ymd(base) }) : t);
+    ui.tkOpen = null;
+    await saveTasks(s, tasks); render();
+    toast(n === 1 ? 'נדחה למחר' : 'נדחה לשבוע הבא');
+  },
+  taskEdit(d) {
+    if (ui.tkOpen) { closeTk(); return; }
+    const s = song(d.id); const t = store.tasksOf(s).find(x => x.id === d.t); if (!t) return;
+    openSheet({ type: 'taskEdit', sid: d.id, tid: d.t, draft: { text: t.text, type: t.type || 'אחר', due: t.due || '', time: t.time || '', rem: t.rem ?? 15 } });
+  },
+  teType(d) { ui.sheet.draft.type = d.k; teKeep(); render(); },
+  teDue(d) { ui.sheet.draft.due = d.k; if (!d.k) ui.sheet.draft.time = ''; teKeep(); render(); },
+  teRem(d) { ui.sheet.draft.rem = +d.k; teKeep(); render(); },
+  teClearTime() { ui.sheet.draft.time = ''; teKeep(); render(); },
+  async teSave() {
+    teKeep(); const sh = ui.sheet, dr = sh.draft; const s = song(sh.sid);
+    if (!dr.text.trim()) return toast('חסר טקסט למשימה');
+    const tasks = store.tasksOf(s).map(t => t.id === sh.tid ? Object.assign({}, t, { text: dr.text.trim(), type: dr.type, due: dr.due || null, time: dr.due && dr.time ? dr.time : null, rem: dr.rem }) : t);
+    closeSheet(); await saveTasks(s, tasks); render();
+  },
+  async taskGo(d) {
+    if (ui.view === 'song' || isWide()) await leaveSong();
+    openSong(d.id);
+    if (d.k === 'כתיבה') { ui.tab = 'text'; ui.editText = true; render(); setTimeout(() => { const t = $('#lyr'); t && t.focus(); }, 60); }
+    else { ui.tab = 'sound'; render(); if (d.k === 'הקלטה') setTimeout(() => A.recHere(), 120); }
+  },
+  async notifyOn() {
+    try { await NT.enable(); ui.notify = 'on'; toast('ההתראות הופעלו'); await store.ensureNotifyKey(); store.syncReminders(); }
+    catch (e) { fail(e); ui.notify = await NT.status(); }
+    render();
+  },
+  async notifyOff() { await NT.disable().catch(fail); ui.notify = await NT.status(); render(); toast('ההתראות כבויות במכשיר הזה'); },
   tasksView(d) { ui.tasksView = d.k; render(); },
   filter(d) { ui.filters[d.k] = !ui.filters[d.k]; render(); },
 
@@ -1158,11 +1277,26 @@ const F = {
     ui.sheet = null; await patchSong(s.id, { beats }, 'נוסף קישור לטייפ ביט'); render();
   },
   async addTask(fd) {
-    const text = String(fd.get('text') || '').trim(); if (!text) return;
-    const s = song(ui.songId); const tasks = store.tasksOf(s).map(t => Object.assign({}, t, t.id === 'n0' ? { id: store.uid() } : {}));
-    tasks.push({ id: store.uid(), text, type: ui.taskType, done: false, at: new Date().toISOString() });
-    await saveTasks(s, tasks, 'משימה חדשה: ' + text); render();
+    const raw = String(fd.get('text') || '').trim(); if (!raw) return;
+    const p = TK.parseTask(raw, []);
+    const s = song(ui.songId); const tasks = store.tasksOf(s).map(t => Object.assign({}, t));
+    const t = { id: store.uid(), text: p.text || raw, type: p.type || ui.taskType, done: false, at: new Date().toISOString(), due: p.due, time: p.time };
+    tasks.push(t);
+    await saveTasks(s, tasks, 'משימה חדשה: ' + t.text); render();
+    if (t.due) toast('נוספה · ' + TK.dueLabel(t));
     setTimeout(() => { const i = $('#nt'); i && i.focus(); }, 20);
+  },
+  async quickTask(fd) {
+    const raw = String(fd.get('text') || '').trim(); if (!raw) return;
+    const p = TK.parseTask(raw, songList());
+    const sid = p.songId || fd.get('song'); const s = song(sid);
+    if (!s) return toast('בוחרים שיר למשימה');
+    const tasks = store.tasksOf(s).map(t => Object.assign({}, t));
+    const t = { id: store.uid(), text: p.text || raw, type: p.type || 'אחר', done: false, at: new Date().toISOString(), due: p.due, time: p.time };
+    tasks.push(t);
+    await saveTasks(s, tasks, 'משימה חדשה: ' + t.text); render();
+    toast('נוספה ל"' + s.data.title + '"' + (t.due ? ' · ' + TK.dueLabel(t) : ''));
+    setTimeout(() => { const i = $('#qt'); i && i.focus(); }, 20);
   },
   async pass(fd) {
     if (fd.get('q1') !== fd.get('q2')) return toast('הסיסמאות לא תואמות');
@@ -1173,6 +1307,8 @@ const F = {
 
 // שינויים בשדות
 const CHG = {
+  teDate(el) { teKeep(); ui.sheet.draft.due = el.value || ''; if (!el.value) ui.sheet.draft.time = ''; render(); },
+  teTime(el) { teKeep(); ui.sheet.draft.time = el.value || ''; render(); },
   async title(el) { const v = el.value.trim(); if (v) await patchSong(ui.songId, { title: v }, 'שם שונה ל"' + v + '"'); },
   async readiness(el) { const s = song(ui.songId); const v = parseFloat(el.value); if (s.data.readiness === v) return; await patchSong(s.id, { readiness: v }, 'מוכנות ' + rd(s.data.readiness) + ' ← ' + rd(v)); render(); },
   async notes(el) { await patchSong(ui.songId, { notes: el.value }); },
@@ -1200,7 +1336,10 @@ const CHG = {
     } catch (e) { fail(e); }
   }
 };
+const songList = () => all().map(s => ({ id: s.id, title: s.data.title }));
 const INP = {
+  qt(el) { const p = TK.parseTask(el.value, songList()); const c = $('#qtc'); if (c) c.innerHTML = qChips(p); if (p.songId) { const sel = $('#qs'); if (sel) sel.value = p.songId; } },
+  nt(el) { const p = TK.parseTask(el.value, []); const c = $('#ntc'); if (c) c.innerHTML = el.value.trim() ? qChips(p) : '<span class="qhint">אפשר לכתוב גם מתי: "מחר", "ביום שלישי", "ב־18"</span>'; },
   rv(el) { const v = parseFloat(el.value); const o = document.getElementById('rvv'); if (o) o.textContent = rd(v); const t = document.getElementById('rvt'); if (t) t.textContent = levelText(v); },
   q(el) { ui.q = el.value; const r = document.getElementById('results'); if (r) r.innerHTML = resultsHtml(); }
 };
@@ -1290,6 +1429,49 @@ function swipeEnd() {
 }
 root.addEventListener('touchend', swipeEnd);
 root.addEventListener('touchcancel', swipeEnd);
+
+// החלקה על משימות: ימינה = בוצע, שמאלה = דחייה. המשימה עוקבת אחרי האצבע, והצבע מתגלה מתחתיה בהדרגה
+const TK_W = 172, TK_DONE = 104;
+let tk = null;
+function closeTk() {
+  const w = ui.tkOpen && root.querySelector('.tk[data-tk="' + CSS.escape(ui.tkOpen) + '"]');
+  if (w) { const f = w.querySelector('.tk-face'); f.style.transform = ''; w.classList.remove('open', 'sl', 'sr'); w.style.removeProperty('--p'); }
+  ui.tkOpen = null;
+}
+root.addEventListener('touchstart', ev => {
+  const w = ev.target.closest('.tk');
+  if (ui.tkOpen && (!w || w.dataset.tk !== ui.tkOpen) && !ev.target.closest('.tk-post')) closeTk();
+  if (!w || ev.target.closest('.tk-post,.cb,.tk-go') || w.classList.contains('doing')) { tk = null; return; }
+  const f = w.querySelector('.tk-face');
+  tk = { w, f, x: ev.touches[0].clientX, y: ev.touches[0].clientY, dx: 0, lock: null, t: Date.now(), base: w.classList.contains('open') ? -TK_W : 0 };
+}, { passive: true });
+root.addEventListener('touchmove', ev => {
+  if (!tk) return; const t = ev.touches[0]; const dx = t.clientX - tk.x, dy = t.clientY - tk.y;
+  if (tk.lock == null && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) tk.lock = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+  if (tk.lock !== 'x') return;
+  tk.dx = dx;
+  let x = tk.base + dx;
+  if (x < -TK_W) x = -TK_W + (x + TK_W) * 0.25;
+  if (x > TK_DONE * 1.6) x = TK_DONE * 1.6 + (x - TK_DONE * 1.6) * 0.3;
+  tk.f.style.transition = 'none'; tk.f.style.transform = 'translateX(' + x + 'px)';
+  tk.w.classList.toggle('sr', x > 0); tk.w.classList.toggle('sl', x < 0);
+  tk.w.classList.toggle('ready', x > TK_DONE);
+  tk.w.style.setProperty('--p', Math.min(1, Math.abs(x) / (x > 0 ? TK_DONE : TK_W)).toFixed(3));
+}, { passive: true });
+function tkEnd() {
+  if (!tk) return; const s = tk; tk = null;
+  if (s.lock !== 'x') return;
+  const x = s.base + s.dx; const fast = Math.abs(s.dx) / Math.max(1, Date.now() - s.t) > 0.6;
+  s.f.style.transition = '';
+  s.w.classList.remove('ready');
+  if (x > TK_DONE || (fast && s.dx > 40 && s.base === 0)) { const [sid, tid] = s.w.dataset.tk.split('|'); return completeTask(sid, tid, 'swipe'); }
+  if (x < -70 || (fast && s.dx < -30)) { s.f.style.transform = 'translateX(' + (-TK_W) + 'px)'; s.w.classList.add('open', 'sl'); s.w.classList.remove('sr'); s.w.style.setProperty('--p', 1); ui.tkOpen = s.w.dataset.tk; return; }
+  s.f.style.transform = ''; s.w.classList.remove('open'); s.w.style.setProperty('--p', 0);
+  setTimeout(() => { if (!s.w.classList.contains('open')) s.w.classList.remove('sl', 'sr'); }, 320);
+  if (ui.tkOpen === s.w.dataset.tk) ui.tkOpen = null;
+}
+root.addEventListener('touchend', tkEnd);
+root.addEventListener('touchcancel', tkEnd);
 
 // גרירה לסידור: שירים, מגירות בבית ובמסך הסידור.
 // באצבע: לחיצה ארוכה, או נגיעה בידית. בעכבר: לוחצים וגוררים. הסדר נשמר בשחרור.
@@ -1431,8 +1613,17 @@ async function enterMain() {
   await store.loadLocal();
   ui.drawer = store.drawers()[0].k;
   render();
-  store.sync().then(render).catch(e => { if (e.status === 401) { ui.screen = 'auth'; render(); } });
+  NT.status().then(v => { ui.notify = v; });
+  store.sync().then(async () => { render(); await store.ensureNotifyKey(); store.syncReminders(); }).catch(e => { if (e.status === 401) { ui.screen = 'auth'; render(); } });
+  const q = new URLSearchParams(location.search).get('song');
+  if (q) { history.replaceState(null, '', location.pathname); openSongState(q); }
 }
+function openSongState(id) {
+  if (!song(id)) return;
+  if (ui.view === 'song' || isWide()) leaveSong();
+  ui.sheet = null; ui.nav = 'home'; openSong(id); ui.tab = 'state'; render();
+}
+if (navigator.serviceWorker) navigator.serviceWorker.addEventListener('message', ev => { if (ev.data && ev.data.type === 'openSong' && ui.screen === 'main') openSongState(ev.data.song); });
 store.onChange(() => { if (ui.screen === 'main' && !ui.sheet && !ui.stage && document.activeElement && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) render(); });
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'hidden') { ui.hiddenAt = Date.now(); return; }

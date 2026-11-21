@@ -2,6 +2,7 @@
 import * as api from './api.js';
 import * as C from './crypto.js';
 import { CONFIG } from './config.js';
+import * as TK from './tasks.js';
 import { kv, songsCache, recsCache, outbox, wipeLocal } from './db.js';
 
 // זיגוגים: הצבע עצמו מוגדר בקובץ העיצוב, פעם ליום ופעם ללילה
@@ -57,11 +58,12 @@ export async function saveOrder(k, ids) { const o = Object.assign({}, meta().ord
 
 // משימות לשיר. שיר ישן שיש לו רק "צעד הבא" מקבל אותו כמשימה ראשונה.
 export const TASK_TYPES = ['כתיבה', 'הקלטה', 'הפקה', 'אחר'];
+export const openTasks = s => tasksOf(s).filter(t => !t.done);
 export function tasksOf(s) {
   if (Array.isArray(s.data.tasks)) return s.data.tasks;
   return s.data.next ? [{ id: 'n0', text: s.data.next, type: 'אחר', done: false }] : [];
 }
-export const nextOf = s => { const t = tasksOf(s).find(x => !x.done); return t ? t.text : ''; };
+export const nextOf = s => { const t = TK.sortTasks(openTasks(s))[0]; return t ? t.text : ''; };
 export const POTS = ['גבוה', 'בינוני', 'נמוך', 'צדדי'];
 export const KINDS = [
   { k: 'sketch', name: 'סקיצה' },
@@ -453,4 +455,47 @@ export async function restoreBackup(payload, onProgress) {
     audio++; onProgress && onProgress();
   }
   return { songsAdded, songsRestored, audio, skipped };
+}
+
+// ---------- מפתח התראות ותזכורות ----------
+// מפתח נפרד, שמור בתוך הכספת (מוצפן), ועותק לא ניתן לייצוא נשמר במכשיר.
+// הוא פותח רק את טקסט התזכורות, כדי שהתראה תוצג גם כשהכספת נעולה. השירים עצמם לא נפתחים בו.
+let nkey = null;
+export async function ensureNotifyKey() {
+  try {
+    let raw = meta().nk;
+    if (!raw) {
+      const k = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+      raw = C.b64.enc(new Uint8Array(await crypto.subtle.exportKey('raw', k)));
+      await saveMeta({ nk: raw });
+    }
+    nkey = await crypto.subtle.importKey('raw', C.b64.dec(raw), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+    await kv.set('nk', nkey);
+  } catch (e) { console.error(e); }
+}
+let remBusy = false, remAgain = false;
+export async function syncReminders() {
+  if (!nkey || !key || !S.online) return;
+  if (remBusy) { remAgain = true; return; }
+  remBusy = true;
+  try {
+    const want = new Map(); const now = Date.now();
+    for (const s of songs()) for (const t of openTasks(s)) {
+      if (t.id === 'n0') continue;
+      const at = TK.remindAt(t); if (!at || at.getTime() < now - 60000) continue;
+      want.set(t.id, { at: at.toISOString(), sig: at.toISOString() + '|' + t.text + '|' + s.data.title + '|' + (t.time || ''), s, t });
+    }
+    const server = await api.listReminders();
+    const sent = (await kv.get('remsig')) || {};
+    const have = new Set(server.map(r => r.id));
+    for (const r of server) if (!want.has(r.id)) { await api.deleteReminder(r.id); delete sent[r.id]; }
+    for (const [id, w] of want) {
+      if (have.has(id) && sent[id] === w.sig) continue;
+      const payload = await C.encJSON(nkey, { t: w.t.text, s: w.s.data.title, id: w.s.id, l: TK.dueLabel(w.t) });
+      await api.upsertReminder({ id, fire_at: w.at, payload, sent_at: null });
+      sent[id] = w.sig;
+    }
+    await kv.set('remsig', sent);
+  } catch (e) { console.error('reminders', e); }
+  finally { remBusy = false; if (remAgain) { remAgain = false; syncReminders(); } }
 }

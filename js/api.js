@@ -145,6 +145,18 @@ export async function removeFile(path) {
   return parse(await req('/storage/v1/object/' + CONFIG.bucket + '/' + enc(path), { method: 'DELETE' }));
 }
 
+// ---------- תזכורות ומנויי התראות ----------
+// בשרת נשמרים רק מועד השליחה ותוכן מוצפן. הטקסט נפתח רק במכשיר.
+export async function listReminders() { return parse(await req('/rest/v1/reminders?select=id,fire_at,sent_at')); }
+export async function upsertReminder(row) {
+  return parse(await req('/rest/v1/reminders', { method: 'POST', headers: Object.assign({ Prefer: 'resolution=merge-duplicates,return=minimal' }, J), body: JSON.stringify(row) }));
+}
+export async function deleteReminder(id) { return parse(await req('/rest/v1/reminders?id=eq.' + encodeURIComponent(id), { method: 'DELETE' })); }
+export async function upsertSub(row) {
+  return parse(await req('/rest/v1/push_subs?on_conflict=endpoint', { method: 'POST', headers: Object.assign({ Prefer: 'resolution=merge-duplicates,return=minimal' }, J), body: JSON.stringify(row) }));
+}
+export async function deleteSub(endpoint) { return parse(await req('/rest/v1/push_subs?endpoint=eq.' + encodeURIComponent(endpoint), { method: 'DELETE' })); }
+
 // ---------- אימות דו־שלבי ----------
 export async function getUser() { return parse(await req('/auth/v1/user')); }
 export async function verifiedFactors() {

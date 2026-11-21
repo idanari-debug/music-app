@@ -6,5 +6,7 @@ export const CONFIG = {
   bucket: 'recordings',
   kdfIterations: 600000,
   storageLimitBytes: 1024 * 1024 * 1024,
-  trashDays: 30
+  trashDays: 30,
+  // מפתח ציבורי לשליחת התראות (החלק הפרטי שמור רק בשרת)
+  vapid: 'BEpbdWDi54vnCwwRgA5oq4mHOsBLp-OfOWRYubSDr9EY3b5qwDxhIj8T3NwVkTrQMjB1LIoU6hig92vbQhVI9as'
 };
