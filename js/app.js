@@ -90,6 +90,8 @@ const I = {
   sliders: svg('<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>', 15, 2),
   grid: svg('<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/>', 16, 2),
   list: svg('<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>', 16, 2),
+  rw10: svg('<path d="M9 5a7 7 0 1 1-6.6 9.3"/><path d="M9 2v6H3"/>', 22, 1.8),
+  ff10: svg('<path d="M15 5a7 7 0 1 0 6.6 9.3"/><path d="M15 2v6h6"/>', 22, 1.8),
   pen: svg('<path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/>', 15, 2),
   bell: svg('<path d="M6 10a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6M10 20a2 2 0 0 0 4 0"/>', 13, 2),
   mic: svg('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>', 17),
@@ -152,6 +154,7 @@ function render() {
   else h = isWide() ? vWide() : vMain();
   root.innerHTML = h;
   if (ui.screen === 'main') updateBadge();
+  if (AU.now.recId) playUi();
   if (keep && root.dataset.k === keep.k) {
     if ($('.main')) $('.main').scrollTop = keep.y;
     if ($('.col.mid')) $('.col.mid').scrollTop = keep.y2;
@@ -261,13 +264,23 @@ function vRecbar() {
 }
 function vPlayer() {
   if (!AU.now.recId || AU.isRecording()) return '';
-  const p = !AU.player.paused;
-  const pct = AU.player.duration ? (AU.player.currentTime / AU.player.duration * 100) : 0;
-  return `<div class="player ${p ? 'playing' : ''}"><span class="disc" aria-hidden="true"></span>
-    <div class="info" data-a="goPlaying"><b>${esc(AU.now.title)} <small>· ${esc(AU.now.song)}</small></b><span class="pbar"><span id="pbar" style="width:${pct}%"></span></span></div>
-    <span class="tm" id="plt">${dur(AU.player.currentTime)}</span>
-    <button class="key acc" data-a="playToggle" aria-label="${p ? 'השהיה' : 'השמעה'}">${p ? I.pause : I.play}</button>
-    <button class="more" data-a="playStop" aria-label="סגירת הנגן">${I.x}</button></div>`;
+  const p = !AU.player.paused, d = AU.player.duration || 0;
+  const pct = d ? (AU.player.currentTime / d * 100) : 0;
+  return `<div class="player ${p ? 'playing' : ''}">
+    <div class="prow"><span class="disc" aria-hidden="true"></span>
+      <div class="info" data-a="playerFull"><b>${esc(AU.now.title)} <small>· ${esc(AU.now.song)}</small></b></div>
+      <span class="ctl3"><button class="skip" data-a="skip" data-k="-10" aria-label="10 שניות אחורה">${I.rw10}</button>
+      <button class="key acc" data-a="playToggle" aria-label="${p ? 'השהיה' : 'השמעה'}">${p ? I.pause : I.play}</button>
+      <button class="skip" data-a="skip" data-k="10" aria-label="10 שניות קדימה">${I.ff10}</button></span>
+      <button class="more" data-a="playStop" aria-label="סגירת הנגן">${I.x}</button></div>
+    <div class="srow2"><span class="tm" id="plt">${dur(AU.player.currentTime)}</span>
+      <div class="scrub pscrub" data-scrub="bar" role="slider" aria-label="מיקום בהקלטה" aria-valuemin="0" aria-valuemax="${Math.round(d)}" aria-valuenow="${Math.round(AU.player.currentTime)}"><span class="tr"></span><span class="fl" id="pbar" style="width:${pct}%"></span><span class="kn" id="pknob" style="left:${pct}%"></span></div>
+      <span class="tm" id="pld">${d ? dur(d) : '–'}</span></div>
+  </div>`;
+}
+function bigWave(r) {
+  const peaks = (r && r.meta.peaks && r.meta.peaks.length) ? r.meta.peaks : Array.from({ length: 72 }, () => 0.35);
+  return `<div class="scrub bigwave" data-scrub="wave" data-wave="${r ? r.id : ''}">${peaks.map(v => `<span style="height:${Math.max(8, v * 100)}%"></span>`).join('')}<i class="phl" id="pbigline"></i></div>`;
 }
 
 // ---- בית ----
@@ -462,8 +475,8 @@ function tText(s, wide) {
 
 function waveHtml(r) {
   const p = r.meta.peaks || [];
-  if (!p.length) return `<div class="wave flat" data-a="seek" data-id="${r.id}"></div>`;
-  return `<div class="wave" data-a="seek" data-id="${r.id}" data-wave="${r.id}">${p.map(v => `<span style="height:${Math.max(8, v * 100)}%"></span>`).join('')}</div>`;
+  if (!p.length) return `<div class="wave flat scrub" data-scrub="wave" data-id="${r.id}"></div>`;
+  return `<div class="wave scrub" data-scrub="wave" data-id="${r.id}" data-wave="${r.id}">${p.map(v => `<span style="height:${Math.max(8, v * 100)}%"></span>`).join('')}</div>`;
 }
 function tSound(s) {
   const recs = store.recsOf(s.id); const beats = s.data.beats || [];
@@ -764,6 +777,15 @@ function vSheet() {
     <p class="hint" style="margin:0;font-size:12px;line-height:1.6">כדאי להשאיר את המסך פתוח עד הסוף. אם הרשת נופלת לרגע, כל חתיכה מנסה שוב לבד.</p>`;
   } else if (sh.type === 'uploadDone') {
     h = `<div class="updone"><span class="ok pop">${I.check || '✓'}</span><b>נשמר במגירה</b><span class="hint">${esc(sh.txt)}</span></div>`;
+  } else if (sh.type === 'player') {
+    const r = S.recs.get(AU.now.recId); const p = !AU.player.paused, d = AU.player.duration || 0, rate = AU.player.playbackRate || 1;
+    h = `<div class="pfhead"><span class="disc ${p ? 'spin' : ''}" aria-hidden="true"></span><div class="grow"><b>${esc(AU.now.title)}</b><span class="hint">${esc(AU.now.song)}${r ? ' · ' + esc(kindName(r.meta.kind)) : ''}</span></div><button class="linkbtn" data-a="goPlaying">לשיר ←</button></div>
+    ${bigWave(r)}
+    <div class="pftimes"><span id="pft">${dur(AU.player.currentTime)}</span><span id="pfl">-${dur(Math.max(0, d - AU.player.currentTime))}</span></div>
+    <div class="pfctl"><button class="skip big" data-a="skip" data-k="-10" aria-label="10 שניות אחורה">${I.rw10}<small>10</small></button>
+      <button class="pfplay" data-a="playToggle" aria-label="${p ? 'השהיה' : 'השמעה'}">${p ? I.pause : I.play}</button>
+      <button class="skip big" data-a="skip" data-k="10" aria-label="10 שניות קדימה">${I.ff10}<small>10</small></button></div>
+    <div class="chips" style="justify-content:center">${[0.75, 1, 1.25, 1.5].map(v => `<button class="chip ${rate === v ? 'on' : ''}" data-a="pspeed" data-k="${v}" style="direction:ltr">${v}×</button>`).join('')}</div>`;
   } else if (sh.type === 'songPick') {
     h = `<div style="display:flex;align-items:center;gap:10px">${sh.dr && !sh.q ? `<button class="iconbtn" data-a="spBack" aria-label="חזרה">${I.back}</button>` : ''}<h3 style="flex:1">${sh.dr && !sh.q ? esc(stageOf(sh.dr).name) : 'לאיזה שיר?'}</h3></div>
     <label class="sr" for="spq">חיפוש שיר</label><input class="inp" id="spq" value="${esc(sh.q || '')}" placeholder="חיפוש שיר בשם" autocomplete="off" data-input="spq">
@@ -1237,8 +1259,11 @@ const A = {
   async beatDel(d) { const s = song(ui.songId); const beats = (s.data.beats || []).filter(b => b.id !== d.id); await patchSong(s.id, { beats }, 'הוסר קישור לטייפ ביט'); render(); },
   play(d) { playRec(d.id); },
   async playToggle() { if (AU.player.paused) await AU.player.play().catch(fail); else AU.player.pause(); render(); },
-  playStop() { AU.player.pause(); AU.now.recId = null; render(); },
-  goPlaying() { if (AU.now.songId && song(AU.now.songId)) { if (ui.view === 'song' || isWide()) leaveSong(); openSong(AU.now.songId); ui.tab = 'sound'; render(); } },
+  playStop() { AU.player.pause(); AU.now.recId = null; ui.sheet = null; render(); },
+  skip(d) { if (!AU.player.duration) return; AU.player.currentTime = Math.max(0, Math.min(AU.player.duration - 0.1, AU.player.currentTime + +d.k)); playUi(); if (!ui.sheet) toast((+d.k > 0 ? '+' : '−') + Math.abs(+d.k) + ' שניות'); },
+  playerFull() { openSheet({ type: 'player' }); },
+  pspeed(d) { AU.player.playbackRate = +d.k; try { AU.player.preservesPitch = true; } catch (e) {} render(); },
+  goPlaying() { ui.sheet = null; if (AU.now.songId && song(AU.now.songId)) { if (ui.view === 'song' || isWide()) leaveSong(); openSong(AU.now.songId); ui.tab = 'sound'; render(); } },
   seek(d, el, ev) {
     if (AU.now.recId !== d.id) return playRec(d.id);
     const r = el.getBoundingClientRect(); const x = (ev.clientX - r.left) / r.width;
@@ -1582,7 +1607,7 @@ function dgScroller(el) { return el.closest('.main') || el.closest('.col.mid') |
 root.addEventListener('pointerdown', ev => {
   if (dg || ev.button > 0 || ui.sheet) return;
   const it = ev.target.closest('[data-dg]');
-  if (!it || ev.target.closest('input,textarea,.sw,.mini,.sw-act button,.cplay')) return;
+  if (!it || ev.target.closest('input,textarea,.sw,.mini,.sw-act button,.cplay,[data-scrub]')) return;
   const box = it.parentElement; if (!box || !box.dataset.dgc) return;
   const onGrip = !!ev.target.closest('.grip');
   const touch = ev.pointerType !== 'mouse';
@@ -1672,14 +1697,47 @@ root.addEventListener('click', ev => { if (dgSuppressClick) { ev.stopPropagation
 root.addEventListener('contextmenu', ev => { if (ev.target.closest('[data-dg]')) ev.preventDefault(); });
 
 // נגן
-AU.player.addEventListener('timeupdate', () => {
-  const t = document.getElementById('plt'); if (t) t.textContent = dur(AU.player.currentTime);
-  const p = AU.player.duration ? AU.player.currentTime / AU.player.duration : 0;
-  const b = document.getElementById('pbar'); if (b) b.style.width = (p * 100) + '%';
-  const w = root.querySelector('[data-wave="' + AU.now.recId + '"]');
-  if (w) { const sp = w.children; const k = Math.floor(p * sp.length); for (let i = 0; i < sp.length; i++) sp[i].style.background = i < k ? 'var(--acc)' : ''; }
+// עדכון חי של הזמן, הפס, הנקודה וגל הקול, בלי לצייר את כל המסך מחדש
+function playUi(tOverride) {
+  const d = AU.player.duration || 0; const t = tOverride != null ? tOverride : AU.player.currentTime;
+  const p = d ? Math.max(0, Math.min(1, t / d)) : 0;
+  const set = (id, fn) => { const e = document.getElementById(id); if (e) fn(e); };
+  set('plt', e => e.textContent = dur(t)); set('pft', e => e.textContent = dur(t)); set('pfl', e => e.textContent = '-' + dur(Math.max(0, d - t)));
+  set('pld', e => e.textContent = d ? dur(d) : '–');
+  set('pbar', e => e.style.width = (p * 100) + '%'); set('pknob', e => e.style.left = (p * 100) + '%');
+  set('pbigline', e => e.style.left = (p * 100) + '%');
+  document.querySelectorAll('[data-wave="' + AU.now.recId + '"]').forEach(w => { const sp = w.querySelectorAll('span'); const k = Math.floor(p * sp.length); sp.forEach((x, i) => { x.style.background = i < k ? 'var(--acc)' : ''; }); });
+}
+AU.player.addEventListener('timeupdate', () => { if (!scrubbing) playUi(); });
+AU.player.addEventListener('loadedmetadata', () => playUi());
+
+// גרירה על פס הנגן ועל גל הקול: קופצים לכל רגע בהקלטה
+let scrubbing = null;
+root.addEventListener('pointerdown', async ev => {
+  const el = ev.target.closest('[data-scrub]'); if (!el || ev.button > 0) return;
+  ev.preventDefault();
+  const id = el.dataset.id || AU.now.recId; if (!id) return;
+  const at = x => { const r = el.getBoundingClientRect(); return Math.max(0, Math.min(1, (x - r.left) / r.width)); };
+  const x0 = ev.clientX;
+  if (AU.now.recId !== id) { await playRec(id); const go = () => { if (AU.player.duration) AU.player.currentTime = at(x0) * AU.player.duration; }; if (AU.player.duration) go(); else AU.player.addEventListener('loadedmetadata', go, { once: true }); return; }
+  scrubbing = { el, pid: ev.pointerId, f: at(x0) };
+  el.classList.add('active'); document.documentElement.classList.add('scrubbing');
+  try { el.setPointerCapture(ev.pointerId); } catch (e) {}
+  playUi(scrubbing.f * (AU.player.duration || 0));
 });
-['play', 'pause', 'ended'].forEach(e => AU.player.addEventListener(e, () => { if (ui.screen === 'main' && !ui.sheet && !ui.stage) render(); }));
+root.addEventListener('pointermove', ev => {
+  if (!scrubbing || ev.pointerId !== scrubbing.pid) return;
+  const r = scrubbing.el.getBoundingClientRect(); scrubbing.f = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+  playUi(scrubbing.f * (AU.player.duration || 0));
+});
+const scrubEnd = ev => {
+  if (!scrubbing || ev.pointerId !== scrubbing.pid) return;
+  const s = scrubbing; scrubbing = null; s.el.classList.remove('active'); document.documentElement.classList.remove('scrubbing');
+  if (AU.player.duration) AU.player.currentTime = s.f * AU.player.duration;
+  playUi();
+};
+root.addEventListener('pointerup', scrubEnd); root.addEventListener('pointercancel', scrubEnd);
+['play', 'pause', 'ended'].forEach(e => AU.player.addEventListener(e, () => { if (ui.screen === 'main' && (!ui.sheet || ui.sheet.type === 'player') && !ui.stage) render(); }));
 
 function afterRender() {
   const sv = document.getElementById('saved'); if (sv && S.pending && !S.online) sv.textContent = 'נשמר במכשיר';
