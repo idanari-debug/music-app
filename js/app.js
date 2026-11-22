@@ -13,7 +13,7 @@ import * as NT from './notify.js';
 const root = document.getElementById('root');
 const $ = s => root.querySelector(s);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const TH = window.MegiraTheme || { pref: () => 'day', set: () => false, isNight: () => false, apply: () => false };
+const TH = window.MegiraTheme || { pref: () => 'day', set: () => false, isNight: () => false, apply: () => false, motion: () => 'full', setMotion: () => {} };
 
 // ---------- מצב ממשק ----------
 const ui = {
@@ -25,7 +25,7 @@ const ui = {
   stage: false, stageRun: false, stageSpeed: 3, stageSize: 26
 };
 const isWide = () => window.innerWidth >= 1000;
-const reduceMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const reduceMotion = () => document.documentElement.classList.contains('rm');
 // מעבר רך בין דפים: קדימה, אחורה או החלפה רכה
 const NAV_DIR = { drawer: 'fwd', open: 'fwd', openState: 'fwd', drawersEdit: 'fwd', goPlaying: 'fwd', songBack: 'back', home: 'back', nav: 'fade', tab: 'fade', sysView: d => d.k === 'trash' ? 'fwd' : 'back' };
 function withTransition(dir, fn) {
@@ -644,6 +644,10 @@ function vSys() {
     <div class="thumbs" aria-hidden="true"><div class="thumb d ${night ? '' : 'sel'}"><i></i><div><span style="--tc:#93A896"></span><span style="--tc:#C48A6C"></span></div></div><div class="thumb n ${night ? 'sel' : ''}"><i></i><div><span style="--tc:#7F9683"></span><span style="--tc:#B57B5E"></span></div></div></div>
     <span class="hint">${pref === 'auto' ? 'בערב, מ־19:00, המגירה מתכהה מעצמה, ובבוקר, מ־06:30, חוזרת לאור. כפתור הירח במסך הבית מחליף ידנית בכל רגע.' : pref === 'night' ? 'המגירה נשארת כהה כל הזמן, גם ביום.' : 'המגירה נשארת בהירה כל הזמן, גם בלילה.'} ההגדרה נשמרת רק במכשיר הזה.</span>
   </div></section>
+  <section><div class="lbl"><span>תנועה</span></div><div class="card" style="gap:10px">
+    <div class="seg"><button class="${TH.motion() === 'full' ? 'on' : ''}" data-a="setMotion" data-k="full">מלאה</button><button class="${TH.motion() === 'system' ? 'on' : ''}" data-a="setMotion" data-k="system">לפי הטלפון</button></div>
+    <span class="hint">${TH.motion() === 'full' ? 'כל האנימציות פועלות, גם אם בטלפון מופעלת "הפחתת תנועה".' : (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches ? 'בטלפון שלך מופעלת "הפחתת תנועה", ולכן רוב האנימציות כבויות.' : 'האנימציות פועלות, ויכבו אם תפעיל "הפחתת תנועה" בטלפון.')}</span>
+  </div></section>
   <section><div class="lbl"><span>התראות</span></div><div class="box">
     <div class="row" style="cursor:default"><span class="grow"><span class="t">תזכורות למשימות</span><span class="m">${ui.notify === 'on' ? 'פעילות במכשיר הזה. הטקסט נשלח מוצפן ונפתח רק כאן' : ui.notify === 'needs-install' ? 'עובד רק כשהמגירה פתוחה מהאייקון במסך הבית' : ui.notify === 'denied' ? 'חסומות בהגדרות הטלפון. אפשר לאשר שם, תחת המגירה' : ui.notify === 'unsupported' ? 'הדפדפן הזה לא תומך בהתראות' : 'כבויות במכשיר הזה'}</span></span>
     ${ui.notify === 'on' ? '<button class="btn sm" data-a="notifyOff">כיבוי</button>' : ui.notify === 'off' ? '<button class="btn sm pri" data-a="notifyOn">הפעלה</button>' : ''}</div></div></section>
@@ -1050,6 +1054,7 @@ const A = {
 
   themeToggle() { TH.set(TH.isNight() ? 'day' : 'night'); render(); },
   setTheme(d) { TH.set(d.k); render(); },
+  setMotion(d) { TH.setMotion(d.k); render(); toast(d.k === 'full' ? 'כל האנימציות פועלות' : 'לפי ההגדרה של הטלפון'); },
 
   nav(d) { if (ui.view === 'song' || isWide()) leaveSong(); ui.nav = d.k; if (d.k === 'home') ui.view = 'dash'; if (d.k === 'sys') ui.sysView = 'main'; ui.sheet = null; ui.arrange = false; render(); if (d.k === 'search') setTimeout(() => { const q = $('#q'); q && q.focus(); }, 50); },
   home() { ui.view = 'dash'; ui.palFor = null; ui.warnFor = null; ui.arrange = false; render(); },
@@ -1531,7 +1536,7 @@ const TK_W = 172, TK_DONE = 104;
 let tk = null;
 function closeTk() {
   const w = ui.tkOpen && root.querySelector('.tk[data-tk="' + CSS.escape(ui.tkOpen) + '"]');
-  if (w) { const f = w.querySelector('.tk-face'); f.style.transform = ''; w.classList.remove('open', 'sl', 'sr'); w.style.removeProperty('--p'); }
+  if (w) { const f = w.querySelector('.tk-face'); f.style.transform = ''; w.classList.remove('open', 'swl', 'swr'); w.style.removeProperty('--p'); }
   ui.tkOpen = null;
 }
 root.addEventListener('touchstart', ev => {
@@ -1550,7 +1555,7 @@ root.addEventListener('touchmove', ev => {
   if (x < -TK_W) x = -TK_W + (x + TK_W) * 0.25;
   if (x > TK_DONE * 1.6) x = TK_DONE * 1.6 + (x - TK_DONE * 1.6) * 0.3;
   tk.f.style.transition = 'none'; tk.f.style.transform = 'translateX(' + x + 'px)';
-  tk.w.classList.toggle('sr', x > 0); tk.w.classList.toggle('sl', x < 0);
+  tk.w.classList.toggle('swr', x > 0); tk.w.classList.toggle('swl', x < 0);
   tk.w.classList.toggle('ready', x > TK_DONE);
   tk.w.style.setProperty('--p', Math.min(1, Math.abs(x) / (x > 0 ? TK_DONE : TK_W)).toFixed(3));
 }, { passive: true });
@@ -1561,9 +1566,9 @@ function tkEnd() {
   s.f.style.transition = '';
   s.w.classList.remove('ready');
   if (x > TK_DONE || (fast && s.dx > 40 && s.base === 0)) { const [sid, tid] = s.w.dataset.tk.split('|'); return completeTask(sid, tid, 'swipe'); }
-  if (x < -70 || (fast && s.dx < -30)) { s.f.style.transform = 'translateX(' + (-TK_W) + 'px)'; s.w.classList.add('open', 'sl'); s.w.classList.remove('sr'); s.w.style.setProperty('--p', 1); ui.tkOpen = s.w.dataset.tk; return; }
+  if (x < -70 || (fast && s.dx < -30)) { s.f.style.transform = 'translateX(' + (-TK_W) + 'px)'; s.w.classList.add('open', 'swl'); s.w.classList.remove('swr'); s.w.style.setProperty('--p', 1); ui.tkOpen = s.w.dataset.tk; return; }
   s.f.style.transform = ''; s.w.classList.remove('open'); s.w.style.setProperty('--p', 0);
-  setTimeout(() => { if (!s.w.classList.contains('open')) s.w.classList.remove('sl', 'sr'); }, 320);
+  setTimeout(() => { if (!s.w.classList.contains('open')) s.w.classList.remove('swl', 'swr'); }, 320);
   if (ui.tkOpen === s.w.dataset.tk) ui.tkOpen = null;
 }
 root.addEventListener('touchend', tkEnd);

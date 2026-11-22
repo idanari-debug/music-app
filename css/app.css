@@ -370,8 +370,8 @@ html[data-vt=fade]::view-transition-new(root){animation:vt-fade-in .28s ease-out
 @keyframes vt-out-back{to{transform:translateX(-12%);opacity:0}}
 @keyframes vt-fade-in{from{opacity:0}}
 @keyframes vt-fade-out{to{opacity:0}}
-@media (prefers-reduced-motion:reduce){::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}
-@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+html.rm::view-transition-group(*),html.rm::view-transition-old(*),html.rm::view-transition-new(*){animation:none!important}
+html.rm *{animation:none!important;transition:none!important}
 
 /* העלאת קובץ כבד */
 .upcard{display:flex;align-items:center;gap:12px;background:var(--surf);border-radius:18px;padding:12px 14px;box-shadow:0 1px 0 var(--hi) inset}
@@ -406,7 +406,7 @@ html[data-vt=fade]::view-transition-new(root){animation:vt-fade-in .28s ease-out
 .updone .hint{margin:0;font-size:13px}
 .pop{animation:pop .5s cubic-bezier(.34,1.56,.64,1)}
 @keyframes pop{0%{transform:scale(.6);opacity:0}70%{transform:scale(1.08)}100%{transform:none;opacity:1}}
-@media (prefers-reduced-motion:reduce){.pop{animation:none}.upstep .meter span{transition:none}}
+html.rm .pop{animation:none}html.rm .upstep .meter span{transition:none}
 
 /* גרירה לסידור */
 [data-dg]{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
@@ -424,20 +424,20 @@ html[data-vt=fade]::view-transition-new(root){animation:vt-fade-in .28s ease-out
 .dgbox.box{overflow:visible}
 html.dragging,html.dragging *{cursor:grabbing!important}
 html.dragging .main,html.dragging .col{scroll-behavior:auto}
-@media (prefers-reduced-motion:reduce){.dgmove,.dglift,.dglift.dgdrop{transition:none!important}}
+html.rm .dgmove,html.rm .dglift,html.rm .dglift.dgdrop{transition:none!important}
 
 /* משימות */
 .tks{display:flex;flex-direction:column;gap:8px}
 .tk{position:relative;border-radius:18px;--p:0;transition:max-height .3s var(--ease),opacity .28s,margin .3s}
 .tk.gone{overflow:hidden;max-height:0!important;opacity:0;margin-bottom:-8px}
 .tk-under{position:absolute;inset:0;border-radius:18px;overflow:hidden;opacity:0;transition:opacity .2s,background .2s}
-.tk.sr .tk-under{opacity:1;background:var(--ok)}
-.tk.sl .tk-under{opacity:1;background:var(--g-ash)}
+.tk.swr .tk-under{opacity:1;background:var(--ok)}
+.tk.swl .tk-under{opacity:1;background:var(--g-ash)}
 .tk-ok{position:absolute;left:18px;top:50%;display:flex;align-items:center;gap:6px;color:#fff;font-size:14px;font-weight:600;opacity:var(--p);transform:translateY(-50%) scale(calc(.7 + .3 * var(--p)));transition:transform .25s cubic-bezier(.34,1.56,.64,1)}
 .tk.ready .tk-ok{transform:translateY(-50%) scale(1.12)}
-.tk:not(.sr) .tk-ok{visibility:hidden}
+.tk:not(.swr) .tk-ok{visibility:hidden}
 .tk-post{position:absolute;right:10px;top:50%;transform:translateY(-50%);display:flex;gap:6px;opacity:var(--p)}
-.tk:not(.sl) .tk-post{visibility:hidden}
+.tk:not(.swl) .tk-post{visibility:hidden}
 .tk-post button{all:unset;cursor:pointer;padding:9px 11px;border-radius:12px;background:rgba(255,255,255,.22);color:#fff;font-size:13px;font-weight:600}
 .tk-face{position:relative;z-index:1;display:flex;gap:12px;align-items:flex-start;padding:12px 14px;background:var(--surf);border-radius:18px;box-shadow:0 1px 0 var(--hi) inset,0 4px 14px var(--sh);transition:transform .38s cubic-bezier(.34,1.25,.64,1);touch-action:pan-y}
 .tk .cb{width:24px;height:24px;margin-top:1px;border-radius:8px;border:2px solid var(--line);color:#fff;transition:background .2s,border-color .2s}
@@ -481,7 +481,7 @@ html.dragging .main,html.dragging .col{scroll-behavior:auto}
 .dtin.on input{border-color:var(--acc)}
 .dtin input:disabled{opacity:.45}
 .linkbtn{all:unset;cursor:pointer;align-self:flex-start;font-size:13px;color:var(--acc-text);font-weight:600}
-@media (prefers-reduced-motion:reduce){.tk,.tk-face,.tk-t,.tk .cb svg,.qc{transition:none!important;animation:none!important}}
+html.rm .tk,html.rm .tk-face,html.rm .tk-t,html.rm .tk .cb svg,html.rm .qc{transition:none!important;animation:none!important}
 .qpick{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 11px;border-radius:10px;font-size:13px;font-weight:600;background:var(--acc-soft);color:var(--acc-text);max-width:60%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .qpick:not(.on){border:1px dashed var(--acc)}
 .spl{display:flex;flex-direction:column;gap:10px;animation:qcin .28s var(--ease)}
@@ -538,4 +538,4 @@ html.dragging .main,html.dragging .col{scroll-behavior:auto}
 .sline .grow{gap:4px}
 .sline.playing{box-shadow:0 0 0 2px var(--g),0 8px 22px var(--sh)}
 .cass.dglift{z-index:30}
-@media (prefers-reduced-motion:reduce){.eq i{animation:none}}
+html.rm .eq i{animation:none}

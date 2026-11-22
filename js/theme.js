@@ -23,6 +23,15 @@
     set: function (p) { try { localStorage.setItem('megira-appearance', p); } catch (e) {} return apply(); },
     isNight: function () { return document.documentElement.getAttribute('data-theme') === 'night'; }
   };
+  // תנועה: "full" (ברירת מחדל) = כל האנימציות תמיד. "system" = מכבד את "הפחתת תנועה" של הטלפון
+  function motion() { try { return localStorage.getItem('megira-motion') || 'full'; } catch (e) { return 'full'; } }
+  function applyMotion() {
+    var rm = motion() === 'system' && window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    document.documentElement.classList.toggle('rm', !!rm);
+  }
+  window.MegiraTheme.motion = motion;
+  window.MegiraTheme.setMotion = function (v) { try { localStorage.setItem('megira-motion', v); } catch (e) {} applyMotion(); };
+  applyMotion();
   apply();
   setInterval(function () { if (pref() === 'auto') apply(); }, 60000);
 })();
