@@ -481,7 +481,7 @@ function waveHtml(r) {
 function tSound(s) {
   const recs = store.recsOf(s.id); const beats = s.data.beats || [];
   return `<div class="grid3"><button class="btn pri" data-a="recHere">הקלטה</button>
-    <label class="btn" style="cursor:pointer">העלאת קובץ<input type="file" accept="audio/*,.m4a,.mp3,.wav,.aac" class="sr" data-change="upload" multiple></label>
+    <label class="btn" style="cursor:pointer">העלאת קובץ<input type="file" accept="audio/*,.m4a,.mp3,.wav,.aac" class="sr" data-change="upload"></label>
     <button class="btn" data-a="beatLink">קישור לביט</button></div>
   <div class="box">${recs.length ? recs.map(r => {
     const cur = AU.now.recId === r.id, on = cur && !AU.player.paused;
@@ -772,13 +772,6 @@ function vSheet() {
       <div class="field"><label for="bu">כתובת</label><input class="inp ltr" id="bu" name="url" type="url" placeholder="https://" required></div>
       <div class="field"><label for="bn">תיאור</label><input class="inp" id="bn" name="note" placeholder="למשל: גרסה 2, יותר איטית"></div>
       <button class="btn pri full" type="submit">הוספה</button></form>`;
-  } else if (sh.type === 'uploadMulti') {
-    const fs = pendingMulti || []; const tot = fs.reduce((a, f) => a + f.size, 0);
-    h = `<h3>${fs.length} קבצים</h3><span class="hint" style="margin-top:-8px">${mb(tot)} מ״ב · כל אחד יישמר כהקלטה נפרדת בשיר הזה</span>
-    <div class="box mlist">${fs.map(f => `<div class="row" style="cursor:default"><span class="grow"><span class="t">${esc(f.name)}</span><span class="m">${mb(f.size)} מ״ב${AU.isLossless(f) ? ' · לא מכווץ' : ''}</span></span></div>`).join('')}</div>
-    <div class="field"><span class="flabel">סוג, לכולם</span><div class="chips">${KINDS.map(k => `<button class="chip ${sh.k === k.k ? 'on' : ''}" data-a="upMultiKind" data-k="${k.k}">${k.name}</button>`).join('')}</div></div>
-    ${sh.canC ? `<button class="opt ${sh.small ? 'on' : ''}" data-a="upMultiSmall"><span class="radio"><span></span></span><span class="grow"><span class="ot"><b>לכווץ קבצים לא מכווצים</b><span class="tagx">לסקיצות</span></span><span class="od">נשמע זהה באוזניות ובהשמעה. כבוי = נשמר מקור, באיכות מלאה.</span></span></button>` : ''}
-    <button class="btn pri full" style="height:54px;font-size:16px" data-a="upMultiGo">להעלות ${fs.length} קבצים</button>`;
   } else if (sh.type === 'queue') {
     h = `<h3>העלאות</h3><span class="hint" style="margin-top:-8px">${Q.running ? 'כדאי להשאיר את המגירה פתוחה עד הסוף. ביציאה מהאפליקציה הטלפון עוצר את ההעלאה.' : 'התור הסתיים'}</span>
     <div class="box">${Q.jobs.map(j => `<div class="row qrow" id="qj${j.id}" style="cursor:default;flex-direction:column;align-items:stretch;gap:6px"><span style="display:flex;align-items:center;gap:8px"><span class="grow"><span class="t">${esc(j.name)}</span><span class="m ql">${esc(j.lbl)}</span></span>
@@ -1104,7 +1097,7 @@ async function runUpload2(f, sh, small) {
   return sid;
 }
 
-let pendingUpload = null, pendingMulti = null;
+let pendingUpload = null;
 
 // ---- תור העלאות ברקע ----
 // כל קובץ נכנס לתור, והחלון נסגר מיד. התור עובד אחד אחרי השני, ופס קטן מעל הנגן מראה איפה הוא עומד.
@@ -1392,14 +1385,7 @@ const A = {
     enqueue([{ f, name: sh.name, k: sh.k, songId: ui.songId, small: sh.pick === 'small' }]);
     toast('נכנס לתור. אפשר להמשיך לעבוד');
   },
-  upMultiKind(d) { ui.sheet.k = d.k; render(); },
-  upMultiSmall() { ui.sheet.small = !ui.sheet.small; render(); },
-  upMultiGo() {
-    const fs = pendingMulti || []; const sh = ui.sheet; pendingMulti = null; ui.sheet = null;
-    enqueue(fs.map(f => ({ f, name: f.name.replace(/\.[^.]+$/, ''), k: sh.k, songId: ui.songId, small: sh.small })));
-    toast(fs.length + ' קבצים נכנסו לתור');
-  },
-  queueOpen() { const e = Q.jobs.filter(j => j.st === 'err'); if (e.length && !Q.running && !ui.sheet) { } openSheet({ type: 'queue' }); },
+  queueOpen() { openSheet({ type: 'queue' }); },
   qRetry(d) { const j = Q.jobs.find(x => x.id === +d.id); if (j && j.f) { j.st = 'wait'; j.p = 0; j.lbl = 'ממתין'; runQueue(); render(); } },
   qRemove(d) { Q.jobs = Q.jobs.filter(x => x.id !== +d.id || x.st === 'cmp' || x.st === 'up'); if (!Q.jobs.length) ui.sheet = null; render(); },
   beatLink() { openSheet({ type: 'beat' }); },
@@ -1591,14 +1577,8 @@ const CHG = {
     try { const r = await store.openBackup(text); openSheet({ type: 'restore', meta: r.meta, payload: r.payload }); }
     catch (e) { if (e.needSecret) openSheet({ type: 'restore', text }); else fail(e); }
   },
-  async upload(el) {
-    const fs = [...(el.files || [])]; el.value = ''; if (!fs.length) return;
-    if (fs.length === 1) { pendingUpload = fs[0]; return openSheet({ type: 'uploadKind', name: fs[0].name.replace(/\.[^.]+$/, '') }); }
-    const anyLossless = fs.some(f => AU.isLossless(f));
-    const canC = anyLossless && (AU.canRealtime() || await AU.canCompress());
-    pendingMulti = fs;
-    openSheet({ type: 'uploadMulti', k: 'sketch', small: canC, canC, anyLossless });
-  },
+  upload(el) { const f = el.files && el.files[0]; el.value = ''; if (!f) return; pendingUpload = f; openSheet({ type: 'uploadKind', name: f.name.replace(/\.[^.]+$/, '') }); },
+
   async import(el) {
     const f = el.files && el.files[0]; if (!f) return;
     try {
