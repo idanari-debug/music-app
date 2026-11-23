@@ -139,7 +139,7 @@ export const canRealtime = () => !!rtMime();
 export function makeCtx() { const AC = window.AudioContext || window.webkitAudioContext; try { return new AC(); } catch (e) { return null; } }
 export async function compressRealtime(file, onProgress, ctx) {
   const mime = rtMime(); if (!mime) throw new Error('no-recorder');
-  ctx = ctx || makeCtx(); if (!ctx) throw new Error('no-audiocontext');
+  const own = !ctx; ctx = ctx || makeCtx(); if (!ctx) throw new Error('no-audiocontext');
   try { if (ctx.state === 'suspended') await ctx.resume(); } catch (e) {}
   const buf = file instanceof ArrayBuffer ? file : await file.arrayBuffer();
   const audio = await within(new Promise((res, rej) => { const p = ctx.decodeAudioData(buf, res, rej); if (p && p.then) p.then(res, rej); }), 120000, 'decode-timeout');
@@ -156,7 +156,8 @@ export async function compressRealtime(file, onProgress, ctx) {
   clearInterval(tick);
   await new Promise(r => setTimeout(r, 300));
   rec.stop(); await within(done, 20000, 'recorder-stop');
-  try { ctx.close(); } catch (e) {}
+  if (own) { try { ctx.close(); } catch (e) {} }
+  try { src.disconnect(); } catch (e) {}
   const type = mime.split(';')[0];
   const blob = new Blob(chunks, { type });
   if (blob.size < 1000) throw new Error('empty-output');

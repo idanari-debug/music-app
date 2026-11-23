@@ -246,7 +246,7 @@ function vMain() {
   else body = ui.sysView === 'trash' ? vTrash() : vSys();
   return `<div class="app">${SPECK}
     ${head}<div class="main" ${head ? 'style="padding-top:6px"' : ''}>${body}</div>
-    ${vRecbar()}${vPlayer()}${vNav()}
+    ${vQueue()}${vRecbar()}${vPlayer()}${vNav()}
     ${ui.sheet ? vSheet() : ''}${ui.stage ? vStage() : ''}
   </div>`;
 }
@@ -481,7 +481,7 @@ function waveHtml(r) {
 function tSound(s) {
   const recs = store.recsOf(s.id); const beats = s.data.beats || [];
   return `<div class="grid3"><button class="btn pri" data-a="recHere">הקלטה</button>
-    <label class="btn" style="cursor:pointer">העלאת קובץ<input type="file" accept="audio/*,.m4a,.mp3,.wav,.aac" class="sr" data-change="upload"></label>
+    <label class="btn" style="cursor:pointer">העלאת קובץ<input type="file" accept="audio/*,.m4a,.mp3,.wav,.aac" class="sr" data-change="upload" multiple></label>
     <button class="btn" data-a="beatLink">קישור לביט</button></div>
   <div class="box">${recs.length ? recs.map(r => {
     const cur = AU.now.recId === r.id, on = cur && !AU.player.paused;
@@ -738,7 +738,7 @@ function vWide() {
   const has = ui.songId && song(ui.songId);
   const main = has ? songHead(true) + `<div class="body">${songBody(true)}</div>` : `<div class="ph"><b>${greet()}, דנדול</b><span>בוחרים שיר מהרשימה, והוא נפתח כאן בגדול.</span><div class="hscroll" style="margin:12px 0 0;padding:4px 0 10px;max-width:100%">${deskCards().slice(0, 4).map(s => { const st = stageOf(s.data.stage); return `<button class="desk" data-a="open" data-id="${s.id}" style="--g:${gv(st)}"><span class="top"><span><span class="led" style="background:${gv(st)}"></span>${esc(st.name)}</span><b class="num" style="font-size:13px;color:var(--ink)">${rd(s.data.readiness)}</b></span><span class="tt">${esc(s.data.title)}</span><span class="tape" aria-hidden="true"><i></i><b></b><i></i></span></button>`; }).join('')}</div></div>`;
   return `<div class="wide">${SPECK}${side}<div class="col mid">${mid}</div><div class="col main2">${main}</div>
-    ${vRecbar()}${vPlayer()}${ui.sheet ? vSheet() : ''}${ui.stage ? vStage() : ''}</div>`;
+    ${vQueue()}${vRecbar()}${vPlayer()}${ui.sheet ? vSheet() : ''}${ui.stage ? vStage() : ''}</div>`;
 }
 
 // ---------- חלונות צפים ----------
@@ -772,6 +772,18 @@ function vSheet() {
       <div class="field"><label for="bu">כתובת</label><input class="inp ltr" id="bu" name="url" type="url" placeholder="https://" required></div>
       <div class="field"><label for="bn">תיאור</label><input class="inp" id="bn" name="note" placeholder="למשל: גרסה 2, יותר איטית"></div>
       <button class="btn pri full" type="submit">הוספה</button></form>`;
+  } else if (sh.type === 'uploadMulti') {
+    const fs = pendingMulti || []; const tot = fs.reduce((a, f) => a + f.size, 0);
+    h = `<h3>${fs.length} קבצים</h3><span class="hint" style="margin-top:-8px">${mb(tot)} מ״ב · כל אחד יישמר כהקלטה נפרדת בשיר הזה</span>
+    <div class="box mlist">${fs.map(f => `<div class="row" style="cursor:default"><span class="grow"><span class="t">${esc(f.name)}</span><span class="m">${mb(f.size)} מ״ב${AU.isLossless(f) ? ' · לא מכווץ' : ''}</span></span></div>`).join('')}</div>
+    <div class="field"><span class="flabel">סוג, לכולם</span><div class="chips">${KINDS.map(k => `<button class="chip ${sh.k === k.k ? 'on' : ''}" data-a="upMultiKind" data-k="${k.k}">${k.name}</button>`).join('')}</div></div>
+    ${sh.canC ? `<button class="opt ${sh.small ? 'on' : ''}" data-a="upMultiSmall"><span class="radio"><span></span></span><span class="grow"><span class="ot"><b>לכווץ קבצים לא מכווצים</b><span class="tagx">לסקיצות</span></span><span class="od">נשמע זהה באוזניות ובהשמעה. כבוי = נשמר מקור, באיכות מלאה.</span></span></button>` : ''}
+    <button class="btn pri full" style="height:54px;font-size:16px" data-a="upMultiGo">להעלות ${fs.length} קבצים</button>`;
+  } else if (sh.type === 'queue') {
+    h = `<h3>העלאות</h3><span class="hint" style="margin-top:-8px">${Q.running ? 'כדאי להשאיר את המגירה פתוחה עד הסוף. ביציאה מהאפליקציה הטלפון עוצר את ההעלאה.' : 'התור הסתיים'}</span>
+    <div class="box">${Q.jobs.map(j => `<div class="row qrow" id="qj${j.id}" style="cursor:default;flex-direction:column;align-items:stretch;gap:6px"><span style="display:flex;align-items:center;gap:8px"><span class="grow"><span class="t">${esc(j.name)}</span><span class="m ql">${esc(j.lbl)}</span></span>
+      ${j.st === 'err' && j.f ? `<button class="btn sm" data-a="qRetry" data-id="${j.id}">ניסיון חוזר</button>` : ''}${j.st === 'wait' || j.st === 'err' ? `<button class="mini" data-a="qRemove" data-id="${j.id}" aria-label="הסרה מהתור">${I.x}</button>` : ''}${j.st === 'done' ? `<span class="okm">${I.check}</span>` : ''}</span>
+      ${j.st === 'cmp' || j.st === 'up' ? `<div class="meter"><span style="width:${Math.round(j.p * 100)}%"></span></div>` : ''}</div>`).join('')}</div>`;
   } else if (sh.type === 'uploadKind' || sh.type === 'recKind') {
     h = `<h3>${sh.type === 'uploadKind' ? 'מה זה הקובץ הזה?' : 'מה הקלטת עכשיו?'}</h3>
     <div class="field"><label for="rn">שם</label><input class="inp" id="rn" value="${esc(sh.name || '')}"></div>
@@ -1092,7 +1104,68 @@ async function runUpload2(f, sh, small) {
   return sid;
 }
 
-let pendingUpload = null;
+let pendingUpload = null, pendingMulti = null;
+
+// ---- תור העלאות ברקע ----
+// כל קובץ נכנס לתור, והחלון נסגר מיד. התור עובד אחד אחרי השני, ופס קטן מעל הנגן מראה איפה הוא עומד.
+// הכיווץ וההצפנה קורים כאן בטלפון. אסור לצאת מהאפליקציה עד שהתור נגמר, כי הטלפון עוצר אותה ברקע.
+const Q = { jobs: [], running: false, ctx: null, wl: null };
+let qid = 0;
+function enqueue(items) {
+  if (!Q.ctx && items.some(j => j.small)) { Q.ctx = AU.makeCtx(); try { Q.ctx && Q.ctx.resume(); } catch (e) {} }
+  for (const j of items) Q.jobs.push(Object.assign({ id: ++qid, st: 'wait', p: 0, lbl: 'ממתין' }, j));
+  render(); runQueue();
+}
+const qActive = () => Q.jobs.filter(j => j.st !== 'done');
+function qPaint() {
+  const c = document.getElementById('qchip'); if (c) { const v = qChipVals(); c.querySelector('.qt').textContent = v.t; c.querySelector('.qb span').style.width = v.p + '%'; c.classList.toggle('err', v.err); }
+  Q.jobs.forEach(j => { const r = document.getElementById('qj' + j.id); if (!r) return; r.querySelector('.ql').textContent = j.lbl; const b = r.querySelector('.meter span'); if (b) b.style.width = Math.round(j.p * 100) + '%'; });
+}
+function qChipVals() {
+  const act = Q.jobs.filter(j => j.st === 'cmp' || j.st === 'up' || j.st === 'wait'); const err = Q.jobs.filter(j => j.st === 'err').length;
+  const total = Q.jobs.length, done = Q.jobs.filter(j => j.st === 'done').length;
+  const cur = Q.jobs.find(j => j.st === 'cmp' || j.st === 'up');
+  if (!act.length) return { t: err ? (err === 1 ? 'העלאה אחת נכשלה · נגיעה לניסיון חוזר' : err + ' העלאות נכשלו · נגיעה לניסיון חוזר') : (total === 1 ? 'ההקלטה נשמרה במגירה' : total + ' הקלטות נשמרו במגירה'), p: 100, err: !!err };
+  const p = Math.round(((done + (cur ? cur.p : 0)) / total) * 100);
+  return { t: (total > 1 ? 'מעלה ' + Math.min(total, done + 1) + ' מתוך ' + total + ' · ' : '') + (cur ? esc(cur.name) + ' · ' + (cur.st === 'cmp' ? 'מכווץ' : 'מעלה') : 'מתחיל'), p, err: false };
+}
+function vQueue() {
+  if (!Q.jobs.length) return '';
+  const v = qChipVals();
+  return `<button class="qchip ${v.err ? 'err' : ''}" id="qchip" data-a="queueOpen"><span class="qi">${v.err ? '!' : I.up || '↑'}</span><span class="qt">${v.t}</span><span class="qb"><span style="width:${v.p}%"></span></span></button>`;
+}
+async function runQueue() {
+  if (Q.running) return; Q.running = true;
+  try { if (navigator.wakeLock) Q.wl = await navigator.wakeLock.request('screen'); } catch (e) {}
+  try {
+    for (;;) {
+      const j = Q.jobs.find(x => x.st === 'wait'); if (!j) break;
+      try {
+        let blob = j.f, mime = j.f.type, pre = null;
+        if (j.small && AU.isLossless(j.f)) {
+          j.st = 'cmp'; j.lbl = 'מכווץ בטלפון'; qPaint();
+          try {
+            const c = await compressAny(j.f, (x, left) => { j.p = x * 0.5; j.lbl = leftTxt(left) || 'מכווץ בטלפון'; qPaint(); }, Q.ctx);
+            blob = c.blob; mime = c.mime; pre = { duration: c.duration, peaks: c.peaks };
+          } catch (e) { if (j.f.size > MAX_UPLOAD) throw new Error('הכיווץ נכשל והקובץ גדול מ־400 מ״ב'); j.lbl = 'הכיווץ לא הצליח, מעלה מקור'; qPaint(); }
+        }
+        if (blob.size > MAX_UPLOAD) throw new Error('הקובץ גדול מ־400 מ״ב');
+        j.st = 'up'; const base = pre ? 0.5 : 0; j.lbl = 'מצפין ומעלה'; qPaint();
+        await saveRecording(blob, mime, j.k, j.name, j.songId, null, pre, (x, i, n) => { j.p = base + x * (1 - base); j.lbl = n > 1 ? 'מעלה · חתיכה ' + Math.min(n, i + 1) + ' מתוך ' + n : 'מצפין ומעלה'; qPaint(); });
+        j.st = 'done'; j.p = 1; j.lbl = 'נשמר · ' + mb(blob.size) + ' מ״ב'; j.f = j.small ? null : j.f;
+      } catch (e) { console.error(e); j.st = 'err'; const m = (e && e.message) || ''; j.lbl = /[\u0590-\u05FF]/.test(m) ? m : 'ההעלאה נכשלה, כנראה בגלל הרשת. אפשר לנסות שוב'; }
+      render();
+    }
+  } finally {
+    Q.running = false;
+    try { Q.wl && Q.wl.release(); } catch (e) {} Q.wl = null;
+    if (Q.ctx) { try { Q.ctx.close(); } catch (e) {} Q.ctx = null; }
+    render();
+    if (!Q.jobs.some(j => j.st === 'err')) setTimeout(() => { if (!Q.running && !Q.jobs.some(j => j.st !== 'done')) { Q.jobs = []; if (ui.sheet && ui.sheet.type === 'queue') ui.sheet = null; render(); } }, 3500);
+  }
+}
+window.addEventListener('beforeunload', e => { if (Q.running) { e.preventDefault(); e.returnValue = ''; } });
+
 let saveTimer = null;
 function markSaving() { const el = document.getElementById('saved'); if (el) { el.textContent = 'שומר…'; el.classList.add('wait'); } }
 function markSaved() { const el = document.getElementById('saved'); if (el) { el.textContent = 'נשמר'; el.classList.remove('wait'); } }
@@ -1300,8 +1373,8 @@ const A = {
     if (!f) return;
     const lossless = AU.isLossless(f);
     if (!lossless && f.size <= 50 * 1048576) {
-      pendingUpload = null; ui.sheet = null; render();
-      try { await saveRecording(f, f.type, d.k, name, ui.songId); render(); } catch (e) { fail(e); }
+      pendingUpload = null; ui.sheet = null;
+      enqueue([{ f, name, k: d.k, songId: ui.songId, small: false }]);
       return;
     }
     const canC = lossless && (AU.canRealtime() || await AU.canCompress());
@@ -1315,10 +1388,20 @@ const A = {
     const sh = ui.sheet, f = pendingUpload; if (!sh || !f) return;
     if (sh.pick === 'small') { sh.ctx = AU.makeCtx(); try { sh.ctx && sh.ctx.resume(); } catch (e) {} }
     if (sh.pick === 'orig' && f.size > MAX_UPLOAD) return toast('מקור מעל 400 מ״ב לא נכנס. אפשר לבחור כיווץ');
-    pendingUpload = null;
-    try { await runUpload(f, sh); render(); }
-    catch (e) { ui.sheet = null; render(); fail(e); }
+    pendingUpload = null; ui.sheet = null;
+    enqueue([{ f, name: sh.name, k: sh.k, songId: ui.songId, small: sh.pick === 'small' }]);
+    toast('נכנס לתור. אפשר להמשיך לעבוד');
   },
+  upMultiKind(d) { ui.sheet.k = d.k; render(); },
+  upMultiSmall() { ui.sheet.small = !ui.sheet.small; render(); },
+  upMultiGo() {
+    const fs = pendingMulti || []; const sh = ui.sheet; pendingMulti = null; ui.sheet = null;
+    enqueue(fs.map(f => ({ f, name: f.name.replace(/\.[^.]+$/, ''), k: sh.k, songId: ui.songId, small: sh.small })));
+    toast(fs.length + ' קבצים נכנסו לתור');
+  },
+  queueOpen() { const e = Q.jobs.filter(j => j.st === 'err'); if (e.length && !Q.running && !ui.sheet) { } openSheet({ type: 'queue' }); },
+  qRetry(d) { const j = Q.jobs.find(x => x.id === +d.id); if (j && j.f) { j.st = 'wait'; j.p = 0; j.lbl = 'ממתין'; runQueue(); render(); } },
+  qRemove(d) { Q.jobs = Q.jobs.filter(x => x.id !== +d.id || x.st === 'cmp' || x.st === 'up'); if (!Q.jobs.length) ui.sheet = null; render(); },
   beatLink() { openSheet({ type: 'beat' }); },
   async beatDel(d) { const s = song(ui.songId); const beats = (s.data.beats || []).filter(b => b.id !== d.id); await patchSong(s.id, { beats }, 'הוסר קישור לטייפ ביט'); render(); },
   play(d) { playRec(d.id); },
@@ -1508,7 +1591,14 @@ const CHG = {
     try { const r = await store.openBackup(text); openSheet({ type: 'restore', meta: r.meta, payload: r.payload }); }
     catch (e) { if (e.needSecret) openSheet({ type: 'restore', text }); else fail(e); }
   },
-  upload(el) { const f = el.files && el.files[0]; if (!f) return; pendingUpload = f; openSheet({ type: 'uploadKind', name: f.name.replace(/\.[^.]+$/, '') }); },
+  async upload(el) {
+    const fs = [...(el.files || [])]; el.value = ''; if (!fs.length) return;
+    if (fs.length === 1) { pendingUpload = fs[0]; return openSheet({ type: 'uploadKind', name: fs[0].name.replace(/\.[^.]+$/, '') }); }
+    const anyLossless = fs.some(f => AU.isLossless(f));
+    const canC = anyLossless && (AU.canRealtime() || await AU.canCompress());
+    pendingMulti = fs;
+    openSheet({ type: 'uploadMulti', k: 'sketch', small: canC, canC, anyLossless });
+  },
   async import(el) {
     const f = el.files && el.files[0]; if (!f) return;
     try {
