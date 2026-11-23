@@ -160,6 +160,14 @@ export async function downloadFile(path) {
   if (!res.ok) await parse(res);
   return new Uint8Array(await res.arrayBuffer());
 }
+export async function listFiles(prefix) {
+  const out = [];
+  for (let off = 0; off < 10000; off += 1000) {
+    const page = await parse(await req('/storage/v1/object/list/' + CONFIG.bucket, { method: 'POST', headers: J, body: JSON.stringify({ prefix, limit: 1000, offset: off }) }));
+    out.push(...page); if (page.length < 1000) break;
+  }
+  return out;
+}
 export async function removeFile(path) {
   return parse(await req('/storage/v1/object/' + CONFIG.bucket + '/' + enc(path), { method: 'DELETE' }));
 }

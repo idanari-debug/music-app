@@ -504,3 +504,23 @@ export async function syncReminders() {
   } catch (e) { console.error('reminders', e); }
   finally { remBusy = false; if (remAgain) { remAgain = false; syncReminders(); } }
 }
+
+// ---------- תחזוקת אחסון ----------
+// שאריות: קבצים בתיקייה שלך שלא שייכים לשום הקלטה (למשל העלאה שנכשלה באמצע)
+export async function findOrphans() {
+  const u = api.currentUser();
+  const files = await api.listFiles(u.id + '/');
+  const used = new Set(); for (const r of S.recs.values()) for (const p of partPaths(r)) used.add(p);
+  return files.filter(f => f.name && f.id !== null && !used.has(u.id + '/' + f.name)).map(f => ({ path: u.id + '/' + f.name, size: (f.metadata && f.metadata.size) || 0 }));
+}
+export async function removeOrphans(list) { for (const f of list) { try { await api.removeFile(f.path); } catch (e) {} } }
+// החלפת הקלטה בגרסה מכווצת: הגרסה החדשה עולה קודם, ורק אחרי שהיא שמורה המקור נמחק
+export async function replaceRecording(oldId, bytes, patch, onProgress) {
+  const old = S.recs.get(oldId); if (!old) throw new Error('missing');
+  const meta = Object.assign({}, old.meta); delete meta.size; delete meta.parts;
+  Object.assign(meta, patch, { date: old.meta.date });
+  const rec = await addRecording(old.song_id, bytes, meta, onProgress);
+  await updateRecording(oldId, null, new Date().toISOString());
+  await purgeRecording(oldId);
+  return rec;
+}

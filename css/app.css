@@ -577,3 +577,6 @@ html.rm .eq i{animation:none}
 .pfplay svg{width:22px;height:22px}
 html.scrubbing,html.scrubbing *{cursor:grabbing!important}
 .player .ctl3{display:flex;align-items:center;gap:2px;direction:ltr}
+.cmplog{padding:10px 16px;font-size:12px;color:var(--mute)}
+.cmplog summary{cursor:pointer;font-weight:600}
+.cmplog div{padding:3px 0;font-variant-numeric:tabular-nums}

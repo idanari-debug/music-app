@@ -127,6 +127,45 @@ function peaksOf(audio) {
   const mx = Math.max(0.01, ...peaks); return peaks.map(p => Math.round((p / mx) * 100) / 100);
 }
 
+// ---------- כיווץ בזמן אמת: מנוע ההקלטה של הטלפון עצמו ----------
+// עובד בכל דפדפן שיודע להקליט (כמו ההקלטות באפליקציה). השיר מתנגן בשקט לתוך המקליט, ולכן זה לוקח כאורך השיר.
+const RT_TYPES = ['audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
+export function rtMime() {
+  if (!window.MediaRecorder || !(window.AudioContext || window.webkitAudioContext)) return '';
+  for (const t of RT_TYPES) { try { if (MediaRecorder.isTypeSupported(t)) return t; } catch (e) {} }
+  return '';
+}
+export const canRealtime = () => !!rtMime();
+export function makeCtx() { const AC = window.AudioContext || window.webkitAudioContext; try { return new AC(); } catch (e) { return null; } }
+export async function compressRealtime(file, onProgress, ctx) {
+  const mime = rtMime(); if (!mime) throw new Error('no-recorder');
+  ctx = ctx || makeCtx(); if (!ctx) throw new Error('no-audiocontext');
+  try { if (ctx.state === 'suspended') await ctx.resume(); } catch (e) {}
+  const buf = file instanceof ArrayBuffer ? file : await file.arrayBuffer();
+  const audio = await within(new Promise((res, rej) => { const p = ctx.decodeAudioData(buf, res, rej); if (p && p.then) p.then(res, rej); }), 120000, 'decode-timeout');
+  const dest = ctx.createMediaStreamDestination();
+  const src = ctx.createBufferSource(); src.buffer = audio; src.connect(dest);
+  const rec = new MediaRecorder(dest.stream, { mimeType: mime, audioBitsPerSecond: 192000 });
+  const chunks = []; rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  const done = new Promise(res => { rec.onstop = res; });
+  rec.start(1000);
+  const t0 = ctx.currentTime;
+  src.start();
+  const tick = setInterval(() => onProgress && onProgress(Math.min(0.99, (ctx.currentTime - t0) / audio.duration), audio.duration - (ctx.currentTime - t0)), 400);
+  await new Promise(res => { src.onended = res; });
+  clearInterval(tick);
+  await new Promise(r => setTimeout(r, 300));
+  rec.stop(); await within(done, 20000, 'recorder-stop');
+  try { ctx.close(); } catch (e) {}
+  const type = mime.split(';')[0];
+  const blob = new Blob(chunks, { type });
+  if (blob.size < 1000) throw new Error('empty-output');
+  const check = await within(decode(await blob.arrayBuffer()), 60000, 'verify-timeout');
+  if (!check || check.duration < audio.duration * 0.97) throw new Error('verify-short');
+  onProgress && onProgress(1, 0);
+  return { blob, mime: type, duration: audio.duration, peaks: peaksOf(audio) };
+}
+
 export async function compress(file, onProgress) {
   const audio = await within(decode(await file.arrayBuffer()), 120000, 'decode-timeout');
   const sampleRate = audio.sampleRate, nch = Math.min(2, audio.numberOfChannels), total = audio.length;

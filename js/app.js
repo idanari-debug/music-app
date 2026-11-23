@@ -21,7 +21,7 @@ const ui = {
   nav: 'home', view: 'dash', drawer: 'ready', songId: null, tab: 'text', sort: 'man', sortDir: 1, arrange: false, moved: null,
   editText: false, chordMode: false, showChords: true, q: '', filters: {}, sysView: 'main',
   sheet: null, pkEnrolled: false, autolock: 5, lastBackup: null, hiddenAt: 0, versions: null, openLyrics: '', recTarget: null, recTimer: null, swipeOpen: null,
-  palFor: null, warnFor: null, tasksView: 'date', notify: null, tkOpen: null, qtDraft: '', qtSong: null, taskType: 'כתיבה', lastDone: null,
+  palFor: null, warnFor: null, tasksView: 'date', orphans: null, notify: null, tkOpen: null, qtDraft: '', qtSong: null, taskType: 'כתיבה', lastDone: null,
   stage: false, stageRun: false, stageSpeed: 3, stageSize: 26
 };
 const isWide = () => window.innerWidth >= 1000;
@@ -646,6 +646,22 @@ function resultsHtml() {
 }
 
 // ---- מערכת ----
+const COMPRESSED = /aac|mp4|m4a|mpeg|mp3|ogg|webm|opus/i;
+function bigRecs() {
+  return store.recsOf ? [...S.recs.values()].filter(r => !r.deleted_at && ((r.meta.size || 0) > 40 * 1048576 || ((r.meta.size || 0) > 12 * 1048576 && !COMPRESSED.test(r.meta.mime || '')))).sort((a, b) => b.meta.size - a.meta.size) : [];
+}
+function storageTools() {
+  const big = bigRecs();
+  const orph = ui.orphans;
+  const orphRow = orph == null
+    ? `<div class="row" style="cursor:default"><span class="grow"><span class="t">שאריות</span><span class="m">קבצים שנשארו מהעלאות שנכשלו באמצע</span></span><button class="btn sm" data-a="orphCheck">בדיקה</button></div>`
+    : orph.length
+      ? `<div class="row" style="cursor:default"><span class="grow"><span class="t">נמצאו שאריות</span><span class="m">${orph.length === 1 ? 'קובץ אחד' : orph.length + ' קבצים'} · ${mb(orph.reduce((a, f) => a + f.size, 0))} מ״ב שלא שייכים לשום הקלטה</span></span><button class="btn sm pri" data-a="orphClean">ניקוי</button></div>`
+      : `<div class="row" style="cursor:default"><span class="grow"><span class="t">אין שאריות</span><span class="m">כל הקבצים שייכים להקלטות</span></span></div>`;
+  return `${orphRow}${big.length ? `<div class="row" style="cursor:default;flex-direction:column;align-items:stretch;gap:6px"><span class="t">הקלטות גדולות</span><span class="m" style="white-space:normal;line-height:1.5">כיווץ מחליף את המקור בגרסה קטנה באיכות גבוהה. אחרי הכיווץ המקור נמחק.</span></div>
+    ${big.map(r => { const sg = song(r.song_id); return `<div class="row" style="cursor:default"><span class="grow"><span class="t">${esc(r.meta.name || kindName(r.meta.kind))}</span><span class="m">${esc(sg ? sg.data.title : '')} · ${mb(r.meta.size)} מ״ב${r.meta.duration ? ' · ' + dur(r.meta.duration) : ''}</span></span><button class="btn sm" data-a="recompressAsk" data-id="${r.id}">כיווץ</button></div>`; }).join('')}` : ''}
+    ${(() => { let l = []; try { l = JSON.parse(localStorage.getItem('megira-cmp-log') || '[]'); } catch (e) {} return l.length ? `<details class="cmplog"><summary>יומן כיווץ במכשיר הזה</summary>${l.map(x => `<div>${esc(x)}</div>`).join('')}</details>` : ''; })()}`;
+}
 function vSys() {
   const used = store.storageUsed(), pct = Math.min(100, used / CONFIG.storageLimitBytes * 100);
   const tr = store.trashedSongs().length + store.trashedRecs().length;
@@ -671,7 +687,8 @@ function vSys() {
     <label class="row"><span class="grow"><span class="t">שחזור מגיבוי</span><span class="m">מחזיר שירים והקלטות שחסרים. לא דורס שום דבר קיים</span></span>${I.chev}<input type="file" accept=".json,application/json" class="sr" data-change="restore"></label>
     <button class="row" data-a="sysView" data-k="trash"><span class="grow"><span class="t">סל מחזור</span><span class="m">${tr} פריטים · נמחקים לצמיתות אחרי ${CONFIG.trashDays} יום</span></span>${I.chev}</button>
     <label class="row"><span class="grow"><span class="t">ייבוא שירים מקובץ</span><span class="m">חבילת ייבוא או ייצוא של הפתקים</span></span>${I.chev}<input type="file" accept=".json,.txt,application/json,text/plain" class="sr" data-change="import"></label>
-    <div class="row" style="cursor:default;flex-direction:column;align-items:stretch;gap:8px"><span style="display:flex;justify-content:space-between;font-size:14px"><span>אחסון הקלטות</span><span class="num" style="font-weight:400;color:var(--mute)">${mb(used)} / 1024 מ״ב</span></span><div class="meter"><span style="width:${pct}%;${pct >= 80 ? 'background:var(--acc)' : ''}"></span></div><span class="m">${pct >= 80 ? 'מתקרב למגבלה. כדאי להוריד גיבוי ולפנות הקלטות ישנות מהסל.' : 'התראה תופיע כשתגיע ל־80%'}</span></div>
+    <div class="row" style="cursor:default;flex-direction:column;align-items:stretch;gap:8px"><span style="display:flex;justify-content:space-between;font-size:14px"><span>אחסון הקלטות</span><span class="num" style="font-weight:400;color:var(--mute)">${mb(used)} / 1024 מ״ב</span></span><div class="meter"><span style="width:${pct}%;${pct >= 80 ? 'background:var(--acc)' : ''}"></span></div><span class="m">${pct >= 80 ? 'מתקרב למגבלה. אפשר לכווץ הקלטות גדולות כאן למטה.' : 'התראה תופיע כשתגיע ל־80%'}</span></div>
+    ${storageTools()}
   </div></section>
   <section><div class="lbl"><span>אבטחה</span></div><div class="box">
     <button class="row" data-a="${ui.mfaOn ? 'mfaOff' : 'mfaSetup'}"><span class="grow"><span class="t">אימות דו־שלבי</span><span class="m">${ui.mfaOn ? 'פעיל · כניסה דורשת גם קוד מאפליקציית אימות' : 'כבוי · מומלץ להפעיל'}</span></span><span class="glz" style="background:${ui.mfaOn ? 'var(--g-celadon)' : 'var(--acc)'}"></span></button>
@@ -777,6 +794,14 @@ function vSheet() {
     <p class="hint" style="margin:0;font-size:12px;line-height:1.6">כדאי להשאיר את המסך פתוח עד הסוף. אם הרשת נופלת לרגע, כל חתיכה מנסה שוב לבד.</p>`;
   } else if (sh.type === 'uploadDone') {
     h = `<div class="updone"><span class="ok pop">${I.check || '✓'}</span><b>נשמר במגירה</b><span class="hint">${esc(sh.txt)}</span></div>`;
+  } else if (sh.type === 'recompress') {
+    const r = S.recs.get(sh.id); const sg = r && song(r.song_id);
+    const est = r && r.meta.duration ? Math.round(r.meta.duration * 192000 / 8) : (r ? r.meta.size * 0.18 : 0);
+    h = `<h3>לכווץ את ההקלטה?</h3>
+    <div class="upcard"><span class="grow"><b>${esc(r ? (r.meta.name || kindName(r.meta.kind)) : '')}</b><span class="hint">${esc(sg ? sg.data.title : '')} · ${mb(r ? r.meta.size : 0)} מ״ב ← כ־${mb(est)} מ״ב</span></span></div>
+    <p class="hint" style="margin:0;line-height:1.6">הגרסה המכווצת נשמעת זהה באוזניות ובהשמעה. היא עולה קודם, ורק אחרי שהיא שמורה המקור נמחק. <b>את המקור אי אפשר לשחזר אחר כך</b>, אז אם זה קובץ להפקה, כדאי שיהיה לך עותק במחשב.</p>
+    <p class="hint" style="margin:0">אם הטלפון יכווץ בזמן אמת, זה ייקח כאורך ההקלטה${r && r.meta.duration ? ' (' + dur(r.meta.duration) + ')' : ''}, והמסך יישאר דלוק.</p>
+    <div class="grid2"><button class="btn" data-a="closeSheet">ביטול</button><button class="btn pri" data-a="recompressGo">כיווץ</button></div>`;
   } else if (sh.type === 'player') {
     const r = S.recs.get(AU.now.recId); const p = !AU.player.paused, d = AU.player.duration || 0, rate = AU.player.playbackRate || 1;
     h = `<div class="pfhead"><span class="disc ${p ? 'spin' : ''}" aria-hidden="true"></span><div class="grow"><b>${esc(AU.now.title)}</b><span class="hint">${esc(AU.now.song)}${r ? ' · ' + esc(kindName(r.meta.kind)) : ''}</span></div><button class="linkbtn" data-a="goPlaying">לשיר ←</button></div>
@@ -1032,12 +1057,25 @@ async function runUpload(f, sh) {
   let wl = null; try { if (navigator.wakeLock) wl = await navigator.wakeLock.request('screen'); } catch (e) {}
   try { return await runUpload2(f, sh, small); } finally { try { wl && wl.release(); } catch (e) {} }
 }
+// כיווץ: קודם המקודד המהיר של הדפדפן. אם אין או שנכשל, מנוע ההקלטה של הטלפון בזמן אמת.
+// כל כישלון נרשם, כדי שבמערכת יהיה אפשר לראות למה.
+function cmpLog(msg) { try { const l = JSON.parse(localStorage.getItem('megira-cmp-log') || '[]'); l.unshift(new Date().toLocaleString('he-IL') + ' · ' + msg); localStorage.setItem('megira-cmp-log', JSON.stringify(l.slice(0, 6))); } catch (e) {} }
+async function compressAny(f, onStep, ctx) {
+  if (await AU.canCompress()) {
+    try { const c = await AU.compress(f, x => onStep(x, null)); return Object.assign(c, { mime: 'audio/aac', how: 'fast' }); }
+    catch (e) { cmpLog('מהיר נכשל: ' + (e && e.message || e)); }
+  } else cmpLog('מהיר לא נתמך במכשיר');
+  if (!AU.canRealtime()) { cmpLog('זמן אמת לא נתמך במכשיר'); throw new Error('no-compress'); }
+  try { const c = await AU.compressRealtime(f, (x, left) => onStep(x, left), ctx); return Object.assign(c, { how: 'realtime' }); }
+  catch (e) { cmpLog('זמן אמת נכשל: ' + (e && e.message || e)); throw e; }
+}
+const leftTxt = sec => sec == null ? null : 'מכווץ בזמן אמת · נשארו ' + dur(Math.max(0, sec));
 async function runUpload2(f, sh, small) {
   let blob = f, mime = f.type, pre = null;
   if (small) {
     try {
-      const c = await AU.compress(f, x => upSet(0, x));
-      blob = c.blob; mime = 'audio/aac'; pre = { duration: c.duration, peaks: c.peaks };
+      const c = await compressAny(f, (x, left) => upSet(0, x, leftTxt(left)), sh.ctx);
+      blob = c.blob; mime = c.mime; pre = { duration: c.duration, peaks: c.peaks };
       upSet(0, 1);
     } catch (e) {
       console.error(e);
@@ -1166,6 +1204,31 @@ const A = {
   },
   // משימות
   taskType(d) { ui.taskType = d.k; render(); setTimeout(() => { const i = $('#nt'); i && i.focus(); }, 20); },
+  async orphCheck() { try { toast('בודק…'); ui.orphans = await store.findOrphans(); } catch (e) { fail(e); } render(); },
+  async orphClean() { const l = ui.orphans || []; try { await store.removeOrphans(l); toast('פונו ' + mb(l.reduce((a, f) => a + f.size, 0)) + ' מ״ב'); ui.orphans = await store.findOrphans(); } catch (e) { fail(e); } render(); },
+  recompressAsk(d) { const r = S.recs.get(d.id); if (!r) return; openSheet({ type: 'recompress', id: d.id }); },
+  async recompressGo() {
+    const id = ui.sheet.id; const r = S.recs.get(id); if (!r) return;
+    const ctx = AU.makeCtx(); try { ctx && ctx.resume(); } catch (e) {}
+    if (AU.now.recId === id) { AU.player.pause(); AU.now.recId = null; }
+    const sg = song(r.song_id);
+    ui.sheet = { type: 'uploadWork', small: true, name: r.meta.name || kindName(r.meta.kind), size: r.meta.size, dur: r.meta.duration, parts: 1 };
+    render();
+    let wl = null; try { if (navigator.wakeLock) wl = await navigator.wakeLock.request('screen'); } catch (e) {}
+    try {
+      upSet(0, 0, 'מוריד ומפענח את ההקלטה…');
+      const bytes = await store.recordingBytes(id);
+      const blob = new Blob([bytes], { type: r.meta.mime || 'audio/wav' });
+      const c = await compressAny(blob, (x, left) => upSet(0, x, leftTxt(left) || 'מכווץ בטלפון'), ctx);
+      if (c.blob.size > bytes.length * 0.8) { closeSheet(); toast('הכיווץ לא חוסך מקום בהקלטה הזו, המקור נשאר'); return; }
+      const nb = new Uint8Array(await c.blob.arrayBuffer());
+      await store.replaceRecording(id, nb, { mime: c.mime, duration: c.duration, peaks: c.peaks }, x => upSet(1, x));
+      ui.sheet = { type: 'uploadDone', txt: 'פונו ' + mb(bytes.length - nb.length) + ' מ״ב · ' + mb(nb.length) + ' מ״ב במקום ' + mb(bytes.length) };
+      render(); setTimeout(() => { if (ui.sheet && ui.sheet.type === 'uploadDone') closeSheet(); }, 1800);
+      if (sg) patchSong(sg.id, {}, 'הקלטה כווצה: ' + (r.meta.name || kindName(r.meta.kind)));
+    } catch (e) { console.error(e); ui.sheet = null; render(); toast('הכיווץ לא הצליח, המקור נשאר כמו שהוא'); }
+    finally { try { wl && wl.release(); } catch (e) {} }
+  },
   dview(d) { setDview(d.k, d.v); render(); },
   async cardPlay(d) { const r = store.recsOf(d.id)[0]; if (!r) return; if (AU.now.recId === r.id && !AU.player.paused) { AU.player.pause(); return render(); } await playRec(r.id); },
   taskDone(d) { return completeTask(d.id, d.t, 'tap'); },
@@ -1241,7 +1304,7 @@ const A = {
       try { await saveRecording(f, f.type, d.k, name, ui.songId); render(); } catch (e) { fail(e); }
       return;
     }
-    const canC = lossless && await AU.canCompress();
+    const canC = lossless && (AU.canRealtime() || await AU.canCompress());
     if (!canC && f.size > MAX_UPLOAD) { pendingUpload = null; ui.sheet = null; render(); return toast('הקובץ גדול מ־400 מ״ב. כדאי לייצא אותו קצר או מכווץ יותר'); }
     const est = await AU.estimate(f);
     ui.sheet = { type: 'uploadHow', k: d.k, name, size: f.size, dur: est.duration, small: est.small, canC, lossless, pick: canC ? 'small' : 'orig' };
@@ -1250,6 +1313,7 @@ const A = {
   upPick(d) { if (ui.sheet && ui.sheet.type === 'uploadHow') { ui.sheet.pick = d.k; render(); } },
   async upGo() {
     const sh = ui.sheet, f = pendingUpload; if (!sh || !f) return;
+    if (sh.pick === 'small') { sh.ctx = AU.makeCtx(); try { sh.ctx && sh.ctx.resume(); } catch (e) {} }
     if (sh.pick === 'orig' && f.size > MAX_UPLOAD) return toast('מקור מעל 400 מ״ב לא נכנס. אפשר לבחור כיווץ');
     pendingUpload = null;
     try { await runUpload(f, sh); render(); }
@@ -1332,7 +1396,7 @@ const A = {
   },
   newRk() { confirmSheet('ליצור מפתח שחזור חדש?', 'המפתח הקודם יפסיק לעבוד מיד.', 'יצירה', async () => { try { const row = await store.vaultState(); const rk = await store.newRecovery(row); openSheet({ type: 'rk', rk }); } catch (e) { fail(e); } }, false); },
   closeSheet() { closeSheet(); },
-  overlay(d, el, ev) { if (ev.target === el && ui.sheet && !['import', 'recKind', 'uploadKind', 'uploadHow', 'uploadWork', 'uploadDone'].includes(ui.sheet.type)) closeSheet(); },
+  overlay(d, el, ev) { if (ev.target === el && ui.sheet && !['import', 'recKind', 'uploadKind', 'uploadHow', 'uploadWork', 'uploadDone', 'recompress'].includes(ui.sheet.type)) closeSheet(); },
   async confirmYes() { const fn = ui.sheet.fn; await fn(); }
 };
 
