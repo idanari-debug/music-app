@@ -173,7 +173,6 @@ export async function compress(file, onProgress) {
   const enc = new AudioEncoder({
     output: (chunk, md) => {
       const b = new Uint8Array(chunk.byteLength); chunk.copyTo(b);
-      if (md && md.decoderConfig && md.decoderConfig.description && !asc) { const d = md.decoderConfig.description; asc = (ArrayBuffer.isView(d) ? new Uint8Array(d.buffer, d.byteOffset, d.byteLength) : new Uint8Array(d)).slice(0, 2); }
       frames.push(b);
     },
     error: e => { err = e; }
@@ -197,7 +196,9 @@ export async function compress(file, onProgress) {
   if (!frames.length) throw new Error('empty');
   // אם הדפדפן כבר עטף את המסגרות, לא עוטפים שוב
   const already = frames[0][0] === 0xFF && (frames[0][1] & 0xF0) === 0xF0;
-  if (!already && !asc) {
+  // את הגדרות המקודד בונים כאן לבד: בספארי ידוע באג שבו המקודד מחזיר הגדרות שגויות,
+  // ואז הקובץ לא נפתח. הערכים ידועים: פרופיל רגיל, קצב הדגימה ומספר הערוצים שביקשנו.
+  if (!already) {
     const fi = SR.indexOf(sampleRate); if (fi < 0) throw new Error('rate');
     asc = new Uint8Array([(2 << 3) | (fi >> 1), ((fi & 1) << 7) | (nch << 3)]);
   }
